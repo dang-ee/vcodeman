@@ -1,0 +1,51 @@
+// Verilog-XL Filelist Grammar (LALR parser)
+// Based on research.md design decisions
+
+start: line+
+
+line: filelist_include
+    | library_option
+    | include_directive
+    | define_directive
+    | libext_directive
+    | file_path
+    | comment
+    | NEWLINE
+
+// Filelist includes (-f/-F) - argument is the rest of the token
+filelist_include: INCLUDE_F -> include_file
+                | INCLUDE_F_CAPS -> include_file_caps
+
+// Library options
+library_option: LIB_DIR -> library_dir
+              | LIB_FILE -> library_file
+
+// Plus-prefixed options (captured as single tokens)
+include_directive: INCDIR_OPTION
+define_directive: DEFINE_OPTION
+libext_directive: LIBEXT_OPTION
+
+// File paths and comments
+file_path: PATH
+comment: COMMENT | LINE_COMMENT
+
+// Complete option terminals (highest priority)
+// These capture the entire option including all + separated values
+INCDIR_OPTION.4: /\+incdir\+[^\s#]+/
+DEFINE_OPTION.4: /\+define\+[^\s#]+/
+LIBEXT_OPTION.4: /\+libext\+[^\s#]+/
+
+// Dash options (capture -f/-F/-y/-v followed by path)
+INCLUDE_F.3: /-f\s+[^\s#]+/
+INCLUDE_F_CAPS.3: /-F\s+[^\s#]+/
+LIB_DIR.3: /-y\s+[^\s#]+/
+LIB_FILE.3: /-v\s+[^\s#]+/
+
+// Other terminals
+PATH.1: /[^\s#]+/
+COMMENT: /#[^\n]*/
+LINE_COMMENT: /\/\/[^\n]*/
+NEWLINE: /\r?\n/
+
+%import common.WS
+%ignore WS
