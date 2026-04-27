@@ -11,7 +11,10 @@ from vcodeman.parser import FilelistParser
 from vcodeman.resolver import CircularReferenceError, UndefinedVariableError
 
 
-@click.group()
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+@click.group(context_settings=CONTEXT_SETTINGS)
 @click.version_option(version=__version__)
 @click.option('-v', '--verbose', count=True, help='Increase verbosity (-v, -vv, -vvv)')
 @click.option('-q', '--quiet', is_flag=True, help='Suppress non-error output')
