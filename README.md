@@ -1,137 +1,130 @@
-# vcodeman - Verilog-XL Filelist Parser and Analyzer
+# vcodeman — Verilog-XL Filelist Parser and Analyzer
 
-A comprehensive Python tool for parsing and analyzing Verilog-XL format filelists, designed for HDL verification and build automation workflows.
+A Python tool for parsing, flattening, and analyzing Verilog-XL format
+filelists. Designed to feed downstream simulators (Cadence Xcelium / xrun,
+Synopsys VCS, Verilator) a single, fully-resolved filelist regardless of
+how nested or env-var-laden the original is.
 
 ## Features
 
-- **Filelist Flattening**: Recursively process nested filelists referenced by `-f` or `-F` options
-- **Path Resolution**: Convert all paths to absolute paths by:
-  - Expanding environment variables (`$VAR` and `${VAR}` syntax)
-  - Resolving relative paths based on containing filelist location
-  - Detecting and preventing circular references
-- **Comprehensive Option Parsing**: Parse all Verilog-XL compiler options:
-  - Library search directories (`-y`)
-  - Library files (`-v`)
-  - Include directories (`+incdir+`)
-  - Macro definitions (`+define+`)
-  - Library extensions (`+libext+`)
-- **Structured Data Model**: Query and serialize parsed information using SQLAlchemy ORM
-- **Resolution Traceability**: Clear markers showing nested filelist boundaries and missing files
+- **Recursive filelist flattening**: expands `-f` / `-F` includes inline.
+- **Path resolution**: expands `$VAR` / `${VAR}`, resolves relative paths
+  against the containing filelist's directory (`-F`) or the cwd (`-f`),
+  and converts everything to absolute.
+- **Circular reference detection**: refuses to hang on `a.f → b.f → a.f`.
+- **Verilog-XL option parsing**: `-y`, `-v`, `+incdir+`, `+define+`,
+  `+libext+`.
+- **Output controls** (text format):
+  - `--no-markers`: suppress the `// RESOLVE START / END` annotations
+    around expanded includes.
+  - `--comment-missing`: rewrite non-existent file entries as
+    `// MISSING: <abs_path> (was: <original>)` so the simulator skips
+    them gracefully instead of erroring.
+- **Structured data model**: `--format json` and `--format sqlite` for
+  programmatic post-processing.
 
 ## Installation
 
 ```bash
-pip install vcodeman
-```
-
-Or for development:
-
-```bash
-git clone https://github.com/yourusername/vcodeman.git
+git clone https://github.com/dang-ee/vcodeman.git
 cd vcodeman
-pip install -e ".[dev]"
+uv tool install .                  # installs the `vcodeman` binary
 ```
 
-## Quick Start
+For development, use an editable install: `uv sync --all-extras`.
 
-### Command Line Interface
+## Quick start
 
-Parse and flatten a filelist:
+### Flatten a filelist for a simulator
 
 ```bash
-vcodeman parse /path/to/design.f --output flattened.f
+vcodeman parse /path/to/design.f \
+        --no-markers \             # clean output, no // RESOLVE markers
+        --comment-missing \        # tolerate missing files (commented out)
+        --output flat.f
+xrun -f flat.f -elaborate ...
 ```
 
-Parse with options:
+### Inspect as JSON
 
 ```bash
-vcodeman parse design.f \
-  --output flat.f \
-  --no-preserve-comments \
-  --validate-files \
-  --format json
+vcodeman parse design.f --format json --output model.json
 ```
 
-Export data model as JSON:
+### Export to SQLite for query-style analysis
 
 ```bash
-vcodeman export design.f --format json > model.json
+vcodeman parse design.f --format sqlite --output design.db
+sqlite3 design.db 'SELECT filepath, exists FROM file_entry WHERE exists = 0;'
 ```
 
-### Python API
+### Strict mode
+
+```bash
+vcodeman parse design.f --strict-env       # fail on undefined env vars
+```
+
+`-h` and `--help` both work, on the group and every subcommand.
+
+## Python API
 
 ```python
-from vcodeman import FilelistParser
 from pathlib import Path
+from vcodeman import FilelistParser
 
-# Parse a filelist
 parser = FilelistParser()
 result = parser.parse(Path("/path/to/design.f"))
 
-# Access parsed data
-print(f"Total files: {len(result.file_entries)}")
-print(f"Include dirs: {[d.path for d in result.include_directories]}")
+print(f"Total files:    {result.total_files}")
+print(f"Include dirs:   {[d.path for d in result.include_directories]}")
+print(f"Missing files:  {[f.filepath for f in result.file_entries if not f.exists]}")
 
-# Serialize to JSON
-json_data = result.serialize_to_json()
+json_blob = result.serialize_to_json()
 ```
 
 ## Requirements
 
 - Python 3.12+
-- Lark (parsing)
-- SQLAlchemy (data modeling)
-- Click (CLI framework)
+- Dependencies (auto-installed): `lark`, `sqlalchemy`, `click`
 
 ## Development
 
-Run tests:
-
 ```bash
-pytest
+uv run pytest                  # run the full suite
+uv run pytest --cov=vcodeman   # with coverage
+uv run ruff format .
+uv run mypy src/vcodeman
 ```
 
-Run with coverage:
-
-```bash
-pytest --cov=vcodeman --cov-report=html
-```
-
-Format code:
-
-```bash
-ruff format .
-```
-
-Type check:
-
-```bash
-mypy src/vcodeman
-```
-
-## Project Structure
+## Project structure
 
 ```
 vcodeman/
-├── src/vcodeman/          # Source code
-│   ├── __init__.py        # Package exports
-│   ├── models.py          # SQLAlchemy data models
-│   ├── parser.py          # Lark parser and transformer
-│   ├── resolver.py        # Path resolution logic
-│   ├── cli.py             # Click CLI commands
-│   └── grammar.lark       # Lark grammar definition
-├── tests/                 # Test suite
-│   ├── conftest.py        # pytest fixtures
-│   ├── test_*.py          # Test modules
-│   └── filelists/         # Test filelist files
-├── pyproject.toml         # Project configuration
-└── README.md              # This file
+├── src/vcodeman/
+│   ├── __init__.py
+│   ├── cli.py                 # Click entry: vcodeman parse
+│   ├── parser.py              # Lark parser + transformer
+│   ├── resolver.py            # Path resolution + env var expansion
+│   ├── models.py              # SQLAlchemy data models
+│   └── grammar.lark           # Lark grammar
+├── tests/
+│   ├── conftest.py            # pytest fixtures
+│   ├── test_parser.py
+│   ├── test_resolver.py
+│   ├── test_models.py
+│   ├── test_cli.py
+│   └── filelists/             # test fixtures
+├── pyproject.toml
+└── README.md
 ```
+
+## Companion tool
+
+[`cmenv`](https://github.com/dang-ee/cmenv) drives the broader CodeMiner
+pre/post-flow and invokes vcodeman with `--no-markers --comment-missing`
+to produce per-side filelists for `xrun -elaborate`. If you only need
+filelist resolution, vcodeman alone is enough.
 
 ## License
 
-MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT.

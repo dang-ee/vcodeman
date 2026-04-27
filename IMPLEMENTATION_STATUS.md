@@ -1,12 +1,36 @@
 # Implementation Status: Verilog-XL Filelist Resolver
 
-**Date**: 2025-11-24
+**Date**: 2025-11-24 (MVP), updated 2026-04-27 (post-MVP additions)
 **Feature**: 001-filelist-resolver
-**Status**: ✅ **MVP COMPLETE AND TESTED** - All functionality verified (26/26 tests passing)
+**Status**: ✅ **MVP COMPLETE + POST-MVP HARDENING** - 32/32 tests passing
 
 ## Summary
 
-The Verilog-XL Filelist Resolver has been successfully implemented and tested with all core P1 (Priority 1) user stories complete. The tool can parse, flatten, and analyze Verilog-XL format filelists with comprehensive option support. **All 26 tests are passing (100% pass rate)**, validating full functionality including circular detection, path resolution, and all compiler options.
+The Verilog-XL Filelist Resolver has been successfully implemented and tested with all core P1 (Priority 1) user stories complete. The tool can parse, flatten, and analyze Verilog-XL format filelists with comprehensive option support. **All 32 tests are passing (100% pass rate)**, validating full functionality including circular detection, path resolution, and all compiler options.
+
+## Post-MVP Additions (2026-04-27)
+
+Driven by integration with the [`cmenv`](https://github.com/dang-ee/cmenv)
+companion tool:
+
+- **`--no-markers` flag** (`vcodeman parse`): suppresses the
+  `// RESOLVE START / END` annotations that mark `-f`/`-F` expansion
+  boundaries in the flattened text output. Lets downstream tools consume a
+  cleaner filelist when traceability isn't needed.
+- **`--comment-missing` flag** (`vcodeman parse`): replaces non-existent
+  file entries with a `// MISSING: <abs_path> (was: <original>)` comment
+  rather than emitting them as live entries. Lets simulators continue past
+  missing files without aborting, while preserving a record of what was
+  missing.
+- **Packaging fix**: `grammar.lark` is now declared as `package-data` in
+  `pyproject.toml`. Without it, `uv tool install` produced a wheel that
+  shipped the package without its grammar file, causing `FileNotFoundError`
+  on first invocation.
+- **`-h` shorthand**: `-h` is accepted everywhere as an alias for `--help`,
+  via Click's `help_option_names` context setting.
+- **3 new CLI tests** cover `--no-markers`, `--comment-missing`, and the
+  combined-flags case (a real file plus a missing one in the same
+  filelist).
 
 ## Completed Features
 
