@@ -48,8 +48,18 @@ def cli(ctx, verbose, quiet):
     is_flag=True,
     help='Fail on undefined environment variables'
 )
+@click.option(
+    '--no-markers',
+    is_flag=True,
+    help='Suppress // RESOLVE START/END markers around -f/-F includes (text format only).'
+)
+@click.option(
+    '--comment-missing',
+    is_flag=True,
+    help='Replace non-existent file entries with // MISSING comments (text format only).'
+)
 @click.pass_context
-def parse(ctx, filelist, output, format, strict_env):
+def parse(ctx, filelist, output, format, strict_env, no_markers, comment_missing):
     """Parse and flatten a Verilog-XL filelist.
 
     Resolves all nested filelists (-f/-F), expands environment variables,
@@ -91,7 +101,11 @@ def parse(ctx, filelist, output, format, strict_env):
             if not quiet:
                 click.echo(f"SQLite database written to: {output}", err=True)
         else:  # text - flattened filelist
-            output_data = _format_flattened(result)
+            output_data = _format_flattened(
+                result,
+                no_markers=no_markers,
+                comment_missing=comment_missing,
+            )
             # Write output
             if output:
                 output.write_text(output_data)
@@ -271,7 +285,11 @@ def _export_sqlite(result, output_path: Path) -> None:
         session.close()
 
 
-def _format_flattened(result) -> str:
+def _format_flattened(
+    result,
+    no_markers: bool = False,
+    comment_missing: bool = False,
+) -> str:
     """Format ParsedFilelist as a flattened Verilog-XL filelist.
 
     Preserves original line order and structure, expanding -f/-F inline with
@@ -279,7 +297,8 @@ def _format_flattened(result) -> str:
 
     Args:
         result: ParsedFilelist instance with _parsed_data
-        use_absolute: Whether to convert paths to absolute paths
+        no_markers: Suppress // RESOLVE START/END markers around expanded includes.
+        comment_missing: Replace non-existent file entries with // MISSING comments.
 
     Returns:
         Flattened filelist string ready for use with simulators
@@ -291,30 +310,47 @@ def _format_flattened(result) -> str:
     # Build a map from filepath to filelist data for nested lookup
     filelist_by_path = {fl['filepath']: fl for fl in filelists}
 
+    # Lookup of (filelist_id, line_number) -> exists for file entries.
+    # Only built when comment_missing is on; otherwise the formatter doesn't
+    # need to know existence.
+    file_exists_map: dict[tuple[int, int], bool] = {}
+    if comment_missing:
+        for fl in filelists:
+            for fe in fl.get('files', []):
+                file_exists_map[(fl['id'], fe['line_number'])] = fe['exists']
+
     def format_filelist(fl_data: dict, indent: str = "") -> list:
         """Recursively format a filelist and its nested includes."""
         lines = []
+        fl_id = fl_data['id']
 
         for item in fl_data.get('line_items', []):
             item_type = item['item_type']
             resolved_text = item['resolved_text'] or item['original_text']
 
             if item_type == 'include_f':
-                # Expand -f/-F inline with RESOLVE markers
+                # Expand -f/-F inline. RESOLVE markers are emitted unless suppressed.
                 include_path = item['include_path']
                 original_text = item['original_text']
-                # Use -f/-F prefix with absolute path
                 option_prefix = "-F" if original_text.startswith("-F") else "-f"
 
-                lines.append(f"{indent}// RESOLVE START: {option_prefix} {include_path}")
+                if not no_markers:
+                    lines.append(f"{indent}// RESOLVE START: {option_prefix} {include_path}")
 
-                # Find the nested filelist data and expand it
                 nested_fl = filelist_by_path.get(include_path)
                 if nested_fl:
                     nested_lines = format_filelist(nested_fl, indent)
                     lines.extend(nested_lines)
 
-                lines.append(f"{indent}// RESOLVE END  : {option_prefix} {include_path}")
+                if not no_markers:
+                    lines.append(f"{indent}// RESOLVE END  : {option_prefix} {include_path}")
+
+            elif item_type == 'file' and comment_missing and not file_exists_map.get(
+                (fl_id, item['line_number']), True
+            ):
+                # Missing file: emit a // MISSING annotation instead of a live entry.
+                original = item['original_text']
+                lines.append(f"{indent}// MISSING: {resolved_text} (was: {original})")
 
             elif item_type == 'comment':
                 # Comments are already converted to // format
