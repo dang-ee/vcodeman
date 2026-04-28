@@ -169,6 +169,66 @@ def test_cli_parse_comment_missing(cli_runner, temp_filelist):
             assert line.lstrip().startswith("//"), f"missing path leaked as live entry: {line!r}"
 
 
+def test_cli_parse_env_injects_variable(cli_runner, tmp_path, monkeypatch):
+    """--env KEY=VALUE injects the var so $KEY in the filelist resolves."""
+    # Make sure PROJ is NOT in the inherited env
+    monkeypatch.delenv("MY_INJECTED_PROJ", raising=False)
+
+    proj_dir = tmp_path / "proj_root"
+    proj_dir.mkdir()
+    (proj_dir / "real.v").write_text("// real\n")
+
+    fl = tmp_path / "list.f"
+    fl.write_text("$MY_INJECTED_PROJ/real.v\n")
+
+    result = cli_runner.invoke(
+        cli, ['parse', str(fl), '--env', f'MY_INJECTED_PROJ={proj_dir}']
+    )
+
+    assert result.exit_code == 0, result.output
+    assert str(proj_dir / "real.v") in result.output
+
+
+def test_cli_parse_env_multiple_pairs(cli_runner, tmp_path, monkeypatch):
+    """Multiple --env flags accumulate; each KEY=VALUE applied independently."""
+    monkeypatch.delenv("INJ_A", raising=False)
+    monkeypatch.delenv("INJ_B", raising=False)
+
+    a_dir = tmp_path / "a"; a_dir.mkdir(); (a_dir / "x.v").write_text("\n")
+    b_dir = tmp_path / "b"; b_dir.mkdir(); (b_dir / "y.v").write_text("\n")
+
+    fl = tmp_path / "list.f"
+    fl.write_text("$INJ_A/x.v\n$INJ_B/y.v\n")
+
+    result = cli_runner.invoke(
+        cli,
+        ['parse', str(fl), '--env', f'INJ_A={a_dir}', '--env', f'INJ_B={b_dir}'],
+    )
+    assert result.exit_code == 0, result.output
+    assert str(a_dir / "x.v") in result.output
+    assert str(b_dir / "y.v") in result.output
+
+
+def test_cli_parse_env_rejects_bad_format(cli_runner, tmp_path):
+    """--env without `=` is rejected with exit code 2."""
+    fl = tmp_path / "list.f"
+    fl.write_text("file.v\n")
+
+    result = cli_runner.invoke(cli, ['parse', str(fl), '--env', 'NO_EQUALS'])
+    assert result.exit_code == 2
+    assert "must be KEY=VALUE" in result.output
+
+
+def test_cli_parse_env_rejects_empty_key(cli_runner, tmp_path):
+    """--env =value (empty key) is rejected."""
+    fl = tmp_path / "list.f"
+    fl.write_text("file.v\n")
+
+    result = cli_runner.invoke(cli, ['parse', str(fl), '--env', '=value_only'])
+    assert result.exit_code == 2
+    assert "may not be empty" in result.output
+
+
 def test_cli_parse_no_markers_and_comment_missing(cli_runner, tmp_path):
     """Both flags compose: clean output, missing files commented."""
     real_file = tmp_path / "real_file.v"

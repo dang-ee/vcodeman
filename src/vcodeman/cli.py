@@ -1,6 +1,7 @@
 """Click-based CLI for vcodeman."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -61,8 +62,18 @@ def cli(ctx, verbose, quiet):
     is_flag=True,
     help='Replace non-existent file entries with // MISSING comments (text format only).'
 )
+@click.option(
+    '--env',
+    'env_pairs',
+    multiple=True,
+    metavar='KEY=VALUE',
+    help='Inject KEY=VALUE into the environment before parsing. Repeatable. '
+    'Lets the caller set the variables a filelist references via $VAR / ${VAR} '
+    'without polluting the surrounding shell. Example: --env PROJ=myproj '
+    '--env USERDIR=alice.'
+)
 @click.pass_context
-def parse(ctx, filelist, output, format, strict_env, no_markers, comment_missing):
+def parse(ctx, filelist, output, format, strict_env, no_markers, comment_missing, env_pairs):
     """Parse and flatten a Verilog-XL filelist.
 
     Resolves all nested filelists (-f/-F), expands environment variables,
@@ -72,12 +83,31 @@ def parse(ctx, filelist, output, format, strict_env, no_markers, comment_missing
         vcodeman parse design.f                    # Output to stdout
         vcodeman parse design.f -o flat.f          # Output to file
         vcodeman parse design.f --format json      # JSON output for debugging
+        vcodeman parse design.f --env PROJ=foo --env USR=alice
     """
     verbose = ctx.obj.get('verbose', 0)
     quiet = ctx.obj.get('quiet', False)
 
     if not quiet and verbose > 0:
         click.echo(f"Parsing: {filelist}", err=True)
+
+    # Inject any --env KEY=VALUE pairs before the parser starts expanding
+    # env vars. Validate format up front; bad input dies with a clear error.
+    for pair in env_pairs:
+        if '=' not in pair:
+            click.secho(
+                f"Error: --env value must be KEY=VALUE (got: {pair!r})",
+                fg='red', err=True,
+            )
+            sys.exit(2)
+        key, _, value = pair.partition('=')
+        if not key:
+            click.secho(
+                f"Error: --env KEY may not be empty (got: {pair!r})",
+                fg='red', err=True,
+            )
+            sys.exit(2)
+        os.environ[key] = value
 
     try:
         # Create parser
