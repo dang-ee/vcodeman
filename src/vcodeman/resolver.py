@@ -5,6 +5,7 @@ Based on research.md design: pathlib.Path + os.path hybrid approach.
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -33,10 +34,16 @@ class PathResolver:
         """Initialize path resolver.
 
         Args:
-            strict_env_vars: If True, raise error on undefined environment variables
+            strict_env_vars: If True, raise error on undefined environment variables.
+                In non-strict mode, undefined vars survive in the output and
+                each unique unresolved name is warned about exactly once.
         """
         self.strict_env_vars = strict_env_vars
         self._env_var_pattern = re.compile(r'\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?')
+        # Names already warned about in non-strict mode (one warning per name
+        # per resolver lifetime, to avoid spamming when the same undefined
+        # var appears in many paths).
+        self._warned_undefined: set[str] = set()
 
     def expand_env_vars(self, path_str: str) -> str:
         """Expand environment variables in path string.
@@ -50,9 +57,9 @@ class PathResolver:
             Path string with environment variables expanded
 
         Raises:
-            UndefinedVariableError: If strict mode and variable is undefined
+            UndefinedVariableError: If strict mode and variable is undefined.
         """
-        # Check for undefined variables in strict mode
+        # Strict mode: refuse to proceed on the first undefined name.
         if self.strict_env_vars:
             for match in self._env_var_pattern.finditer(path_str):
                 var_name = match.group(1)
@@ -61,16 +68,28 @@ class PathResolver:
                         f"Undefined environment variable: ${var_name}"
                     )
 
-        # Expand variables
         expanded = os.path.expandvars(path_str)
 
-        # Check if any variables remain unexpanded in strict mode
         if self.strict_env_vars and '$' in expanded:
-            # Find the first unexpanded variable
             for match in self._env_var_pattern.finditer(expanded):
                 var_name = match.group(1)
                 raise UndefinedVariableError(
                     f"Undefined environment variable: ${var_name}"
+                )
+
+        # Non-strict mode: warn (once per name) about leftover unresolved
+        # references so the user sees that the path they're getting has a
+        # gap in it.
+        if not self.strict_env_vars:
+            for match in self._env_var_pattern.finditer(expanded):
+                var_name = match.group(1)
+                if var_name in self._warned_undefined:
+                    continue
+                self._warned_undefined.add(var_name)
+                print(
+                    f"warning: undefined env var ${var_name} survives in resolved "
+                    f"path: {expanded}",
+                    file=sys.stderr,
                 )
 
         return expanded

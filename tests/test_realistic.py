@@ -358,6 +358,38 @@ def test_undefined_env_var_is_left_unchanged_by_default(runner, tmp_path):
     assert result.exit_code == 0, result.output
 
 
+def test_undefined_env_var_warns_to_stderr(runner, tmp_path, monkeypatch):
+    """In non-strict mode the parser must surface unresolved $VARs as a
+    stderr warning so the user notices the gap. CliRunner mixes stdout and
+    stderr by default, so we check the merged output."""
+    monkeypatch.delenv("ZZ_REALLY_NOT_SET", raising=False)
+    fl = _write(tmp_path / "f.f", "$ZZ_REALLY_NOT_SET/foo.v\n")
+    result = runner.invoke(cli, ['parse', str(fl)])
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output.lower()
+    assert "ZZ_REALLY_NOT_SET" in result.output
+
+
+def test_repeated_undefined_var_warns_only_once(runner, tmp_path, monkeypatch):
+    """Same var seen in many paths warns once per resolver invocation."""
+    monkeypatch.delenv("ZZ_DUPE", raising=False)
+    fl = _write(tmp_path / "f.f",
+        "$ZZ_DUPE/a.v\n"
+        "$ZZ_DUPE/b.v\n"
+        "$ZZ_DUPE/c.v\n"
+    )
+    result = runner.invoke(cli, ['parse', str(fl)])
+    assert result.exit_code == 0
+    # Count warning lines mentioning ZZ_DUPE
+    warning_count = sum(
+        1 for line in result.output.splitlines()
+        if "warning" in line.lower() and "ZZ_DUPE" in line
+    )
+    assert warning_count == 1, (
+        f"expected 1 dedup'd warning, got {warning_count}\n{result.output}"
+    )
+
+
 def test_strict_env_fails_on_undefined_var(runner, tmp_path):
     fl = _write(tmp_path / "f.f", "$DEFINITELY_NOT_SET_xyz/foo.v\n")
     result = runner.invoke(cli, ['parse', str(fl), '--strict-env'])
