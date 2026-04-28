@@ -1,7 +1,10 @@
 // Verilog-XL Filelist Grammar (LALR parser)
 // Based on research.md design decisions
 
-start: line+
+// `line*` (not `line+`) so empty / whitespace-only filelists parse cleanly
+// instead of erroring out — a downstream tool can decide what to do with
+// no content, but the parser shouldn't refuse to read it.
+start: line*
 
 line: filelist_include
     | library_option
@@ -41,10 +44,13 @@ INCLUDE_F_CAPS.3: /-F\s+[^\s#]+/
 LIB_DIR.3: /-y\s+[^\s#]+/
 LIB_FILE.3: /-v\s+[^\s#]+/
 
-// Other terminals
+// Other terminals.
+// Comment terminals get explicit higher priority so that `// header words`
+// and `# header words` are tokenized as a single comment, not as `//`/`#`
+// followed by individual file_path tokens for each remaining word.
+COMMENT.2: /#[^\n]*/
+LINE_COMMENT.2: /\/\/[^\n]*/
 PATH.1: /[^\s#]+/
-COMMENT: /#[^\n]*/
-LINE_COMMENT: /\/\/[^\n]*/
 NEWLINE: /\r?\n/
 
 %import common.WS

@@ -8,29 +8,38 @@
 
 The Verilog-XL Filelist Resolver has been successfully implemented and tested with all core P1 (Priority 1) user stories complete. The tool can parse, flatten, and analyze Verilog-XL format filelists with comprehensive option support. **All 32 tests are passing (100% pass rate)**, validating full functionality including circular detection, path resolution, and all compiler options.
 
-## Post-MVP Additions (2026-04-27)
+## Post-MVP Additions (2026-04-27 → 2026-04-28)
 
 Driven by integration with the [`cmenv`](https://github.com/dang-ee/cmenv)
-companion tool:
+companion tool, and a sweep of realistic-filelist regressions.
 
-- **`--no-markers` flag** (`vcodeman parse`): suppresses the
-  `// RESOLVE START / END` annotations that mark `-f`/`-F` expansion
-  boundaries in the flattened text output. Lets downstream tools consume a
-  cleaner filelist when traceability isn't needed.
-- **`--comment-missing` flag** (`vcodeman parse`): replaces non-existent
-  file entries with a `// MISSING: <abs_path> (was: <original>)` comment
-  rather than emitting them as live entries. Lets simulators continue past
-  missing files without aborting, while preserving a record of what was
-  missing.
+- **`--env KEY=VALUE` flag** (`vcodeman parse`, repeatable): inject env
+  vars before parsing so filelists referencing `$VAR` / `${VAR}` resolve
+  per-invocation, without polluting the calling shell. Validated up front
+  (missing `=` or empty key → exit 2).
+- **Resolve markers** are now lowercase `// resolved start / end` and are
+  always emitted around expanded `-f`/`-F` blocks. (The earlier
+  `--no-markers` and `--comment-missing` flags were removed; they may
+  return if a real need surfaces.)
+- **Grammar fix — multi-word `//` and `#` comments**: the comment
+  terminals now have explicit higher priority than `PATH`, so
+  `// this is a multi word comment` is one comment line instead of being
+  split into a `//` comment plus several `path` tokens.
+- **Grammar fix — empty filelists**: `start: line+` → `start: line*`, so
+  zero-length or whitespace-only filelists parse cleanly instead of
+  erroring on `$END`.
 - **Packaging fix**: `grammar.lark` is now declared as `package-data` in
   `pyproject.toml`. Without it, `uv tool install` produced a wheel that
   shipped the package without its grammar file, causing `FileNotFoundError`
   on first invocation.
 - **`-h` shorthand**: `-h` is accepted everywhere as an alias for `--help`,
   via Click's `help_option_names` context setting.
-- **3 new CLI tests** cover `--no-markers`, `--comment-missing`, and the
-  combined-flags case (a real file plus a missing one in the same
-  filelist).
+- **`tests/test_realistic.py`** (35 cases): broad real-world filelist
+  patterns — multi-word comments, env var forms, nested includes,
+  `+option` chains, dash options, weird path characters, CRLF, blank
+  lines, trailing whitespace, `./` and `../` relative resolution,
+  `--strict-env` behavior, etc. Plus 4 `--env` tests in
+  `tests/test_cli.py`.
 
 ## Completed Features
 

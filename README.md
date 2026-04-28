@@ -14,12 +14,13 @@ how nested or env-var-laden the original is.
 - **Circular reference detection**: refuses to hang on `a.f → b.f → a.f`.
 - **Verilog-XL option parsing**: `-y`, `-v`, `+incdir+`, `+define+`,
   `+libext+`.
-- **Output controls** (text format):
-  - `--no-markers`: suppress the `// RESOLVE START / END` annotations
-    around expanded includes.
-  - `--comment-missing`: rewrite non-existent file entries as
-    `// MISSING: <abs_path> (was: <original>)` so the simulator skips
-    them gracefully instead of erroring.
+- **Resolve markers**: expanded `-f`/`-F` includes are bracketed by
+  `// resolved start / end` comments so a reader can trace where each
+  block came from.
+- **Env var injection**: `--env KEY=VALUE` (repeatable) sets variables
+  before parsing, useful when filelists reference site-specific names
+  like `$project` or `${userdir}`.
+- **Strict mode**: `--strict-env` fails fast on undefined env vars.
 - **Structured data model**: `--format json` and `--format sqlite` for
   programmatic post-processing.
 
@@ -38,11 +39,16 @@ For development, use an editable install: `uv sync --all-extras`.
 ### Flatten a filelist for a simulator
 
 ```bash
-vcodeman parse /path/to/design.f \
-        --no-markers \             # clean output, no // RESOLVE markers
-        --comment-missing \        # tolerate missing files (commented out)
-        --output flat.f
+vcodeman parse /path/to/design.f --output flat.f
 xrun -f flat.f -elaborate ...
+```
+
+### Inject env vars consumed by the filelist
+
+```bash
+vcodeman parse design.f \
+        --env project=/proj/myproj --env userdir=alice \
+        --output flat.f
 ```
 
 ### Inspect as JSON
@@ -121,9 +127,9 @@ vcodeman/
 ## Companion tool
 
 [`cmenv`](https://github.com/dang-ee/cmenv) drives the broader CodeMiner
-pre/post-flow and invokes vcodeman with `--no-markers --comment-missing`
-to produce per-side filelists for `xrun -elaborate`. If you only need
-filelist resolution, vcodeman alone is enough.
+pre/post-flow and invokes vcodeman with `--env project=... --env
+userdir=...` to produce per-side filelists for `xrun -elaborate`. If
+you only need filelist resolution, vcodeman alone is enough.
 
 ## License
 

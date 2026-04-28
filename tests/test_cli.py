@@ -140,35 +140,6 @@ def test_cli_error_handling(cli_runner, tmp_path):
     assert result.exit_code != 0
 
 
-def test_cli_parse_no_markers(cli_runner, test_filelists):
-    """--no-markers suppresses // RESOLVE START / END around -f/-F includes."""
-    nested_root = test_filelists / "nested_root.f"
-
-    result = cli_runner.invoke(cli, ['parse', str(nested_root), '--no-markers'])
-
-    assert result.exit_code == 0
-    assert "RESOLVE START" not in result.output
-    assert "RESOLVE END" not in result.output
-    # Flattening still happens — content from nested filelist is inlined
-    assert "level1_file.v" in result.output
-    assert "root_file.v" in result.output
-
-
-def test_cli_parse_comment_missing(cli_runner, temp_filelist):
-    """--comment-missing replaces non-existent file lines with // MISSING comments."""
-    filelist = temp_filelist("/nonexistent/zzz_missing_file.v\n")
-
-    result = cli_runner.invoke(cli, ['parse', str(filelist), '--comment-missing'])
-
-    assert result.exit_code == 0
-    assert "// MISSING:" in result.output
-    assert "/nonexistent/zzz_missing_file.v" in result.output
-    # Path must appear ONLY inside a comment line, never as a live entry
-    for line in result.output.splitlines():
-        if "/nonexistent/zzz_missing_file.v" in line:
-            assert line.lstrip().startswith("//"), f"missing path leaked as live entry: {line!r}"
-
-
 def test_cli_parse_env_injects_variable(cli_runner, tmp_path, monkeypatch):
     """--env KEY=VALUE injects the var so $KEY in the filelist resolves."""
     # Make sure PROJ is NOT in the inherited env
@@ -229,28 +200,3 @@ def test_cli_parse_env_rejects_empty_key(cli_runner, tmp_path):
     assert "may not be empty" in result.output
 
 
-def test_cli_parse_no_markers_and_comment_missing(cli_runner, tmp_path):
-    """Both flags compose: clean output, missing files commented."""
-    real_file = tmp_path / "real_file.v"
-    real_file.write_text("// dummy\n")
-
-    nested = tmp_path / "nested.f"
-    nested.write_text("/nonexistent/inside_nested.v\n")
-
-    root = tmp_path / "root.f"
-    root.write_text(f"-f {nested}\n{real_file}\n")
-
-    result = cli_runner.invoke(
-        cli, ['parse', str(root), '--no-markers', '--comment-missing']
-    )
-
-    assert result.exit_code == 0
-    assert "RESOLVE START" not in result.output
-    assert "RESOLVE END" not in result.output
-    assert "// MISSING:" in result.output
-    # Real file appears as a live entry (not commented)
-    real_live = [
-        ln for ln in result.output.splitlines()
-        if str(real_file) in ln and not ln.lstrip().startswith("//")
-    ]
-    assert len(real_live) == 1, f"expected real file once as live entry, got: {real_live!r}"
