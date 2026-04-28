@@ -418,6 +418,74 @@ def test_indented_then_normal_lines(runner, tmp_path):
         assert needle in out, f"missing: {needle}\n{out}"
 
 
+# ─── --skip-ext: comment out files by extension ───────────────────────────
+
+
+def test_skip_ext_comments_out_matching_files(runner, tmp_path):
+    """Files ending in any --skip-ext value are emitted as comments rather
+    than live entries, while other files survive untouched."""
+    fl = _write(tmp_path / "f.f",
+        "/path/foo.v\n"
+        "/path/bar.vhd\n"
+        "/path/baz.sv\n"
+        "/path/qux.v\n"
+    )
+    out = _parse(runner, fl, "--skip-ext", ".vhd")
+
+    # .vhd is commented out
+    assert "// skipped (.vhd): /path/bar.vhd" in out
+    # Other extensions survive as live entries
+    live_lines = [
+        ln for ln in out.splitlines()
+        if ln.strip() and not ln.lstrip().startswith("//")
+    ]
+    live_paths = [ln.strip() for ln in live_lines]
+    assert "/path/foo.v" in live_paths
+    assert "/path/baz.sv" in live_paths
+    assert "/path/qux.v" in live_paths
+    assert "/path/bar.vhd" not in live_paths
+
+
+def test_skip_ext_multiple_extensions(runner, tmp_path):
+    """Repeating --skip-ext stacks: each extension is commented out."""
+    fl = _write(tmp_path / "f.f",
+        "/p/a.v\n"
+        "/p/b.vhd\n"
+        "/p/c.sv\n"
+        "/p/d.v\n"
+    )
+    out = _parse(runner, fl, "--skip-ext", ".vhd", "--skip-ext", ".sv")
+    assert "// skipped (.vhd): /p/b.vhd" in out
+    assert "// skipped (.sv): /p/c.sv" in out
+    live_paths = [
+        ln.strip() for ln in out.splitlines()
+        if ln.strip() and not ln.lstrip().startswith("//")
+    ]
+    assert live_paths == ["/p/a.v", "/p/d.v"]
+
+
+def test_skip_ext_accepts_no_dot_form(runner, tmp_path):
+    """`--skip-ext vhd` (no leading dot) works the same as `.vhd`."""
+    fl = _write(tmp_path / "f.f", "/p/a.v\n/p/b.vhd\n")
+    out = _parse(runner, fl, "--skip-ext", "vhd")
+    assert "// skipped (.vhd): /p/b.vhd" in out
+
+
+def test_skip_ext_does_not_affect_options(runner, tmp_path):
+    """--skip-ext only filters file_path items; +incdir+ / +define+ etc.
+    keep flowing through verbatim even if they end in a skipped extension
+    (which would only happen by accident)."""
+    fl = _write(tmp_path / "f.f",
+        "+incdir+/some/path\n"
+        "+define+X=1\n"
+        "/files/foo.vhd\n"
+    )
+    out = _parse(runner, fl, "--skip-ext", ".vhd")
+    assert "+incdir+/some/path" in out
+    assert "+define+X=1" in out
+    assert "// skipped (.vhd): /files/foo.vhd" in out
+
+
 def test_lots_of_comments_around_options(runner, tmp_path):
     """Filelists with heavy commentary around the actual options."""
     fl = _write(tmp_path / "f.f",

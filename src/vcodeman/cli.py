@@ -62,8 +62,18 @@ def cli(ctx, verbose, quiet):
     'without polluting the surrounding shell. Example: --env PROJ=myproj '
     '--env USERDIR=alice.'
 )
+@click.option(
+    '--skip-ext',
+    'skip_exts',
+    multiple=True,
+    metavar='EXT',
+    help='Comment out file entries whose path ends with EXT (text format only). '
+    'Repeatable. Leading dot is optional: `.vhd` and `vhd` both match. The '
+    'file path stays in the output as a `// skipped (.ext):` comment so the '
+    'reader can see what was filtered.'
+)
 @click.pass_context
-def parse(ctx, filelist, output, format, strict_env, env_pairs):
+def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts):
     """Parse and flatten a Verilog-XL filelist.
 
     Resolves all nested filelists (-f/-F), expands environment variables,
@@ -124,7 +134,11 @@ def parse(ctx, filelist, output, format, strict_env, env_pairs):
             if not quiet:
                 click.echo(f"SQLite database written to: {output}", err=True)
         else:  # text - flattened filelist
-            output_data = _format_flattened(result)
+            normalized_skip_exts = {
+                e if e.startswith('.') else f'.{e}'
+                for e in skip_exts
+            }
+            output_data = _format_flattened(result, skip_exts=normalized_skip_exts)
             # Write output
             if output:
                 output.write_text(output_data)
@@ -304,7 +318,7 @@ def _export_sqlite(result, output_path: Path) -> None:
         session.close()
 
 
-def _format_flattened(result) -> str:
+def _format_flattened(result, skip_exts: set[str] | None = None) -> str:
     """Format ParsedFilelist as a flattened Verilog-XL filelist.
 
     Preserves original line order and structure, expanding -f/-F inline
@@ -312,6 +326,9 @@ def _format_flattened(result) -> str:
 
     Args:
         result: ParsedFilelist instance with _parsed_data
+        skip_exts: extensions (e.g. {'.vhd', '.sv'}) whose `file` items
+            should be rewritten as `// skipped (.ext):` comments instead
+            of live entries. Each extension must include the leading dot.
 
     Returns:
         Flattened filelist string ready for use with simulators
@@ -320,6 +337,7 @@ def _format_flattened(result) -> str:
     if not filelists:
         return ""
 
+    skip_exts = skip_exts or set()
     filelist_by_path = {fl['filepath']: fl for fl in filelists}
 
     def format_filelist(fl_data: dict, indent: str = "") -> list:
@@ -341,8 +359,15 @@ def _format_flattened(result) -> str:
                     lines.extend(format_filelist(nested_fl, indent))
                 lines.append(f"{indent}// resolved end  : {option_prefix} {include_path}")
 
+            elif item_type == 'file' and skip_exts:
+                ext = Path(resolved_text).suffix
+                if ext in skip_exts:
+                    lines.append(f"{indent}// skipped ({ext}): {resolved_text}")
+                else:
+                    lines.append(f"{indent}{resolved_text}")
+
             else:
-                # comment, file, lib_*, incdir, define, libext: pass through
+                # comment, lib_*, incdir, define, libext: pass through
                 lines.append(f"{indent}{resolved_text}")
 
         return lines
