@@ -1,103 +1,302 @@
-# vcodeman — Verilog-XL Filelist Parser and Analyzer
+# vcodeman — Verilog-XL Filelist Parser
 
-A Python tool for parsing, flattening, and analyzing Verilog-XL format
-filelists. Designed to feed downstream simulators (Cadence Xcelium / xrun,
-Synopsys VCS, Verilator) a single, fully-resolved filelist regardless of
-how nested or env-var-laden the original is.
-
-## Features
-
-- **Recursive filelist flattening**: expands `-f` / `-F` includes inline.
-- **Path resolution**: expands `$VAR` / `${VAR}`, resolves relative paths
-  against the containing filelist's directory (`-F`) or the cwd (`-f`),
-  and converts everything to absolute.
-- **Circular reference detection**: refuses to hang on `a.f → b.f → a.f`.
-- **Verilog-XL option parsing**: `-y`, `-v`, `+incdir+`, `+define+`,
-  `+libext+`.
-- **Resolve markers**: expanded `-f`/`-F` includes are bracketed by
-  `// resolved start / end` comments so a reader can trace where each
-  block came from.
-- **Env var injection**: `--env KEY=VALUE` (repeatable) sets variables
-  before parsing, useful when filelists reference site-specific names
-  like `$project` or `${userdir}`.
-- **Strict mode**: `--strict-env` fails fast on undefined env vars.
-- **Structured data model**: `--format json` and `--format sqlite` for
-  programmatic post-processing.
+Flatten, inspect, and transform Verilog-XL `.f` filelists.
+Resolves all nested `-f`/`-F` includes, expands `$VAR`/`${VAR}`, and
+produces a single ready-to-use filelist for Cadence Xcelium, Synopsys VCS,
+or Verilator.
 
 ## Installation
 
 ```bash
 git clone https://github.com/dang-ee/vcodeman.git
 cd vcodeman
-uv tool install .                  # installs the `vcodeman` binary
+uv tool install .          # installs the `vcodeman` binary globally
 ```
 
-For development, use an editable install: `uv sync --all-extras`.
-
-## Quick start
-
-### Flatten a filelist for a simulator
+Development (editable):
 
 ```bash
-vcodeman parse /path/to/design.f --output flat.f
-xrun -f flat.f -elaborate ...
+uv sync --all-extras
 ```
 
-### Inject env vars consumed by the filelist
+---
+
+## Cookbook
+
+### 1. Flatten to stdout
+
+```bash
+vcodeman parse design.f
+```
+
+Nested `-f`/`-F` blocks are expanded inline, wrapped in resolver comments:
+
+```
+// resolved start: -f sub/ip.f
+/abs/path/to/sub/ip/core.v
+/abs/path/to/sub/ip/ctrl.v
+// resolved end  : -f sub/ip.f
+/abs/path/to/top.v
+```
+
+---
+
+### 2. Write to a file
+
+```bash
+vcodeman parse design.f -o flat.f
+xrun -f flat.f -elaborate
+```
+
+---
+
+### 3. Inject environment variables
+
+Filelists often reference site-specific variables (`$proj`, `${USERDIR}`).
+Pass them in without modifying your shell environment:
 
 ```bash
 vcodeman parse design.f \
-        --env project=/proj/myproj --env userdir=alice \
-        --output flat.f
+  --env PROJ=/proj/myproj \
+  --env USERDIR=/home/alice \
+  -o flat.f
 ```
 
-### Inspect as JSON
+`--env` is repeatable. Variables are available to all nested filelists.
+
+---
+
+### 4. Fail fast on undefined env vars
+
+By default, unresolved `$VAR` tokens are left as-is with a warning.
+Use `--strict-env` to turn them into a hard error:
 
 ```bash
-vcodeman parse design.f --format json --output model.json
+vcodeman parse design.f --strict-env
+# Error: Undefined environment variable
+#   $UNDEFINED_VAR referenced in design.f:3
 ```
 
-### Export to SQLite for query-style analysis
+---
+
+### 5. Skip files by extension (mixed-language filelists)
+
+Comment out VHDL or other unwanted files without removing them from the
+list — useful when running a Verilog-only sim against a mixed-language project:
 
 ```bash
-vcodeman parse design.f --format sqlite --output design.db
-sqlite3 design.db 'SELECT filepath, exists FROM file_entry WHERE exists = 0;'
+vcodeman parse design.f --skip-ext vhd --skip-ext vhdl -o flat.f
 ```
 
-### Strict mode
+Skipped lines appear as comments so you can audit what was filtered:
+
+```
+// skipped (.vhd): /abs/path/alu.vhd
+// skipped (.vhdl): /abs/path/pkg.vhdl
+/abs/path/core.v
+```
+
+The leading dot is optional: `vhd` and `.vhd` both work. `--skip-ext` is
+only effective with `--format text` (the default).
+
+---
+
+### 6. JSON output for scripting
 
 ```bash
-vcodeman parse design.f --strict-env       # fail on undefined env vars
+vcodeman parse design.f --format json | jq '.file_entries[].filepath'
 ```
 
-`-h` and `--help` both work, on the group and every subcommand.
+Or save it:
+
+```bash
+vcodeman parse design.f --format json -o model.json
+```
+
+The JSON schema mirrors the internal data model — one array per entity type
+(`file_entries`, `filelists`, `library_directories`, `macro_definitions`, …).
+
+---
+
+### 7. SQLite output for ad-hoc queries
+
+```bash
+vcodeman parse design.f --format sqlite -o design.db
+```
+
+If `-o` is omitted, the database is written next to the input file
+(`design.db`).
+
+Useful queries:
+
+```sql
+-- files that don't exist on disk
+SELECT filepath, filelist_id
+FROM file_entry
+WHERE exists = 0;
+
+-- all +define+ macros
+SELECT name, value FROM macro_definition;
+
+-- +incdir+ paths, in order
+SELECT dirpath FROM include_directory ORDER BY position;
+
+-- how deep is the include tree?
+SELECT filepath, nesting_level FROM filelist ORDER BY nesting_level DESC;
+```
+
+---
+
+### 8. Verbose and quiet modes
+
+```bash
+# print progress to stderr
+vcodeman -v parse design.f -o flat.f
+
+# suppress all non-error output
+vcodeman -q parse design.f -o flat.f
+```
+
+`-v` can be repeated (`-vv`, `-vvv`) for more detail.
+
+---
+
+### 9. Real-world combined example
+
+```bash
+vcodeman parse top.f \
+  --env PROJ=/proj/aurora \
+  --env GRID=/cad/pdk/1.8 \
+  --strict-env \
+  --skip-ext vhd \
+  -o run/flat.f \
+  -v
+```
+
+---
+
+## Filelist syntax reference
+
+`vcodeman` understands the following Verilog-XL constructs:
+
+| Syntax | Meaning |
+|---|---|
+| `path/to/file.v` | Source file |
+| `-f path.f` | Include filelist (paths relative to **cwd**) |
+| `-F path.f` | Include filelist (paths relative to **filelist's own dir**) |
+| `-y /path/to/dir` | Library search directory |
+| `-v /path/to/file.v` | Library file |
+| `+incdir+dir1+dir2` | Include directories (chainable with `+`) |
+| `+define+MACRO+KEY=val` | Preprocessor defines (chainable with `+`) |
+| `+libext+.v+.sv` | Library file extensions |
+| `$VAR` or `${VAR}` | Environment variable expansion |
+| `// comment` or `# comment` | Line comments (passed through to output) |
+
+Blank lines and leading/trailing whitespace are ignored. CRLF line endings
+are handled transparently.
+
+---
 
 ## Python API
 
 ```python
 from pathlib import Path
-from vcodeman import FilelistParser
+from vcodeman.parser import FilelistParser
 
-parser = FilelistParser()
-result = parser.parse(Path("/path/to/design.f"))
+parser = FilelistParser(strict_env_vars=False)
+result = parser.parse(Path("design.f"))
 
-print(f"Total files:    {result.total_files}")
-print(f"Include dirs:   {[d.path for d in result.include_directories]}")
-print(f"Missing files:  {[f.filepath for f in result.file_entries if not f.exists]}")
+# summary
+print(result.root_filepath)
+print(result.warnings)   # list[str]
+print(result.errors)     # list[str]
 
-json_blob = result.serialize_to_json()
+# flat access
+data = result.to_dict()  # mirrors the JSON output schema
+for fe in data["file_entries"]:
+    print(fe["filepath"], "exists:", fe["exists"])
 ```
 
-## Requirements
+Inject env vars before calling `parse()`:
 
-- Python 3.12+
-- Dependencies (auto-installed): `lark`, `sqlalchemy`, `click`
+```python
+import os
+os.environ["PROJ"] = "/proj/aurora"
+result = parser.parse(Path("design.f"))
+```
+
+---
+
+## Output format details
+
+### Text (default)
+
+A flattened, simulator-ready filelist.  Nested includes are replaced
+in-place with their contents, bracketed by resolver comments:
+
+```
+// resolved start: -F sub/ip.f
+/abs/path/core.v
+// resolved end  : -F sub/ip.f
+```
+
+Files skipped via `--skip-ext` become:
+
+```
+// skipped (.vhd): /abs/path/pkg.vhd
+```
+
+All other tokens (`+incdir+`, `+define+`, `-y`, `-v`, inline comments)
+are passed through verbatim.
+
+### JSON
+
+Structured representation — one key per entity type.  Useful for
+tooling that consumes filelist data programmatically.
+
+```jsonc
+{
+  "root_filepath": "/abs/path/design.f",
+  "timestamp": "2026-04-30T12:00:00",
+  "warnings": [],
+  "errors": [],
+  "filelists": [...],
+  "file_entries": [
+    { "filepath": "/abs/path/top.v", "exists": true, "line_number": 5, ... }
+  ],
+  "library_directories": [...],
+  "macro_definitions": [...],
+  "include_directories": [...],
+  "library_extensions": [...]
+}
+```
+
+### SQLite
+
+All entities are stored in a relational schema.  Table names match the
+JSON keys (`file_entry`, `filelist`, `library_directory`, etc.).
+The `filelist.nesting_level` column tracks include depth; `filelist.parent_id`
+gives the adjacency-list tree.
+
+---
+
+## Error reference
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Parse error (circular reference, missing file, etc.) |
+| `2` | Bad CLI arguments (`--env` format error) |
+
+Errors are printed to stderr in color.  Pass `-vv` to see a full traceback.
+
+---
 
 ## Development
 
 ```bash
-uv run pytest                  # run the full suite
-uv run pytest --cov=vcodeman   # with coverage
+uv run pytest                   # full test suite (32 tests)
+uv run pytest --cov=vcodeman    # with coverage
 uv run ruff format .
 uv run mypy src/vcodeman
 ```
@@ -107,19 +306,21 @@ uv run mypy src/vcodeman
 ```
 vcodeman/
 ├── src/vcodeman/
+│   ├── _version.py            # single source of truth for __version__
 │   ├── __init__.py
-│   ├── cli.py                 # Click entry: vcodeman parse
-│   ├── parser.py              # Lark parser + transformer
-│   ├── resolver.py            # Path resolution + env var expansion
-│   ├── models.py              # SQLAlchemy data models
-│   └── grammar.lark           # Lark grammar
+│   ├── cli.py                 # Click entry point (dynamic imports for fast --help)
+│   ├── parser.py              # Lark LALR parser + transformer
+│   ├── resolver.py            # path resolution + env var expansion
+│   ├── models.py              # SQLAlchemy ORM models
+│   └── grammar.lark           # Verilog-XL grammar
 ├── tests/
-│   ├── conftest.py            # pytest fixtures
+│   ├── conftest.py
 │   ├── test_parser.py
 │   ├── test_resolver.py
 │   ├── test_models.py
 │   ├── test_cli.py
-│   └── filelists/             # test fixtures
+│   ├── test_realistic.py
+│   └── filelists/             # test fixture .f files
 ├── pyproject.toml
 └── README.md
 ```
@@ -127,9 +328,9 @@ vcodeman/
 ## Companion tool
 
 [`cmenv`](https://github.com/dang-ee/cmenv) drives the broader CodeMiner
-pre/post-flow and invokes vcodeman with `--env project=... --env
-userdir=...` to produce per-side filelists for `xrun -elaborate`. If
-you only need filelist resolution, vcodeman alone is enough.
+pre/post-flow and calls vcodeman with `--env` to produce per-side filelists
+for `xrun -elaborate`. If you only need filelist resolution, vcodeman alone
+is sufficient.
 
 ## License
 
