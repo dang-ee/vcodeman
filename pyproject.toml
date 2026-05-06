@@ -26,6 +26,10 @@ dependencies = [
     "lark>=1.1.9",
     "sqlalchemy>=2.0.23",
     "click>=8.1.7",
+    "tree-sitter>=0.25",
+    "tree-sitter-systemverilog>=0.3",
+    "anthropic>=0.25",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
