@@ -101,7 +101,63 @@ only effective with `--format text` (the default).
 
 ---
 
-### 6. JSON output for scripting
+### 6. Move all `+incdir+` to the top
+
+Some simulators require all include directories to appear before any source
+files. Use `--incdir-first` to collect every `+incdir+` entry — including
+those buried inside nested `-f`/`-F` includes — and output them at the very
+top:
+
+```bash
+vcodeman parse design.f --incdir-first -o flat.f
+```
+
+Input (scattered across nested files):
+
+```
+design/top.v
++incdir+include/shared       ← in the middle
+design/core.v
++incdir+include/ip           ← also in the middle
+```
+
+Output with `--incdir-first`:
+
+```
++incdir+include/shared
++incdir+include/ip
+design/top.v
+design/core.v
+```
+
+`--incdir-first` is only effective with `--format text` (the default).
+
+---
+
+### 7. Strip all comments from output
+
+Use `--no-comments` to remove every comment line from the output — including
+original `//`/`#` comments from the filelist and the resolver's own
+`// resolved start:` / `// resolved end:` markers:
+
+```bash
+vcodeman parse design.f --no-comments -o flat.f
+```
+
+This produces the cleanest possible output for feeding directly into a
+simulator without any annotation overhead.
+
+Combine with `--incdir-first` for a fully clean, simulator-ready filelist:
+
+```bash
+vcodeman parse design.f --incdir-first --no-comments -o flat.f
+```
+
+`--no-comments` is only effective with `--format text` (the default).
+
+---
+
+### 8. JSON output for scripting
 
 ```bash
 vcodeman parse design.f --format json | jq '.file_entries[].filepath'
@@ -118,7 +174,7 @@ The JSON schema mirrors the internal data model — one array per entity type
 
 ---
 
-### 7. SQLite output for ad-hoc queries
+### 9. SQLite output for ad-hoc queries
 
 ```bash
 vcodeman parse design.f --format sqlite -o design.db
@@ -147,7 +203,7 @@ SELECT filepath, nesting_level FROM filelist ORDER BY nesting_level DESC;
 
 ---
 
-### 8. Verbose and quiet modes
+### 10. Verbose and quiet modes
 
 ```bash
 # print progress to stderr
@@ -161,7 +217,7 @@ vcodeman -q parse design.f -o flat.f
 
 ---
 
-### 9. Real-world combined example
+### 11. Real-world combined example
 
 ```bash
 vcodeman parse top.f \
@@ -169,6 +225,8 @@ vcodeman parse top.f \
   --env GRID=/cad/pdk/1.8 \
   --strict-env \
   --skip-ext vhd \
+  --incdir-first \
+  --no-comments \
   -o run/flat.f \
   -v
 ```
@@ -248,6 +306,10 @@ Files skipped via `--skip-ext` become:
 
 All other tokens (`+incdir+`, `+define+`, `-y`, `-v`, inline comments)
 are passed through verbatim.
+
+Use `--incdir-first` to move all `+incdir+` entries (including those from
+nested includes) to the very top of the output. Use `--no-comments` to strip
+all comment lines — original `//`/`#` comments and resolver markers alike.
 
 ### JSON
 

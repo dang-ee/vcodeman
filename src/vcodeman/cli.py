@@ -38,8 +38,10 @@ def cli(ctx, verbose, quiet):
 @click.option('--strict-env', is_flag=True, help='Fail on undefined env vars')
 @click.option('--env', 'env_pairs', multiple=True, metavar='KEY=VALUE', help='Inject env var (repeatable)')
 @click.option('--skip-ext', 'skip_exts', multiple=True, metavar='EXT', help='Comment out by extension, text only (repeatable)')
+@click.option('--incdir-first', is_flag=True, help='Move all +incdir+ entries to the top, text only')
+@click.option('--no-comments', is_flag=True, help='Strip all comments from output, text only')
 @click.pass_context
-def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts):
+def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts, incdir_first, no_comments):
     """Flatten a filelist, expanding all nested -f/-F includes.
 
     Example: vcodeman parse design.f -o flat.f
@@ -88,7 +90,12 @@ def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts):
                 e if e.startswith('.') else f'.{e}'
                 for e in skip_exts
             }
-            output_data = _format_flattened(result, skip_exts=normalized_skip_exts)
+            output_data = _format_flattened(
+                result,
+                skip_exts=normalized_skip_exts,
+                incdir_first=incdir_first,
+                no_comments=no_comments,
+            )
             if output:
                 output.write_text(output_data)
                 if not quiet:
@@ -244,7 +251,12 @@ def _export_sqlite(result, output_path: Path) -> None:
         session.close()
 
 
-def _format_flattened(result, skip_exts: set[str] | None = None) -> str:
+def _format_flattened(
+    result,
+    skip_exts: set[str] | None = None,
+    incdir_first: bool = False,
+    no_comments: bool = False,
+) -> str:
     filelists = result._parsed_data.get('filelists', [])
     if not filelists:
         return ""
@@ -252,7 +264,19 @@ def _format_flattened(result, skip_exts: set[str] | None = None) -> str:
     skip_exts = skip_exts or set()
     filelist_by_path = {fl['filepath']: fl for fl in filelists}
 
-    def format_filelist(fl_data: dict, indent: str = "") -> list:
+    def collect_incdirs(fl_data: dict) -> list[str]:
+        """Recursively collect all +incdir+ lines across nested includes."""
+        incdirs = []
+        for item in fl_data.get('line_items', []):
+            if item['item_type'] == 'incdir':
+                incdirs.append(item['resolved_text'] or item['original_text'])
+            elif item['item_type'] == 'include_f':
+                nested_fl = filelist_by_path.get(item['include_path'])
+                if nested_fl:
+                    incdirs.extend(collect_incdirs(nested_fl))
+        return incdirs
+
+    def format_filelist(fl_data: dict, indent: str = "", skip_incdirs: bool = False) -> list[str]:
         lines = []
         for item in fl_data.get('line_items', []):
             item_type = item['item_type']
@@ -262,15 +286,22 @@ def _format_flattened(result, skip_exts: set[str] | None = None) -> str:
                 include_path = item['include_path']
                 original_text = item['original_text']
                 option_prefix = "-F" if original_text.startswith("-F") else "-f"
-                lines.append(f"{indent}// resolved start: {option_prefix} {include_path}")
+                if not no_comments:
+                    lines.append(f"{indent}// resolved start: {option_prefix} {include_path}")
                 nested_fl = filelist_by_path.get(include_path)
                 if nested_fl:
-                    lines.extend(format_filelist(nested_fl, indent))
-                lines.append(f"{indent}// resolved end  : {option_prefix} {include_path}")
+                    lines.extend(format_filelist(nested_fl, indent, skip_incdirs))
+                if not no_comments:
+                    lines.append(f"{indent}// resolved end  : {option_prefix} {include_path}")
+            elif item_type == 'incdir' and skip_incdirs:
+                pass  # already hoisted to top
+            elif item_type == 'comment' and no_comments:
+                pass
             elif item_type == 'file' and skip_exts:
                 ext = Path(resolved_text).suffix
                 if ext in skip_exts:
-                    lines.append(f"{indent}// skipped ({ext}): {resolved_text}")
+                    if not no_comments:
+                        lines.append(f"{indent}// skipped ({ext}): {resolved_text}")
                 else:
                     lines.append(f"{indent}{resolved_text}")
             else:
@@ -279,6 +310,12 @@ def _format_flattened(result, skip_exts: set[str] | None = None) -> str:
         return lines
 
     root_filelist = filelists[0]
+
+    if incdir_first:
+        incdirs = collect_incdirs(root_filelist)
+        rest = format_filelist(root_filelist, skip_incdirs=True)
+        return "\n".join(incdirs + rest)
+
     return "\n".join(format_filelist(root_filelist))
 
 
