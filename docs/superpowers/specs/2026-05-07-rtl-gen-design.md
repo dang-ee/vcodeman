@@ -12,8 +12,8 @@
 a Verilog-XL `.f` filelist that passes compilation. It:
 
 1. Collects all `.sv`, `.v`, `.svh`, `.vh` files
-2. Extracts dependency information via **pyslang** AST (packages, imports, module
-   instantiations, includes, macro defines)
+2. Extracts dependency information via **tree-sitter-systemverilog** AST (packages, imports,
+   module instantiations, includes, macro defines — all as first-class AST nodes, no regex)
 3. Builds a dependency graph and topologically sorts it
 4. Detects top-module candidates and selects the best one
 5. Writes the `.f` filelist (plus two sidecar files)
@@ -63,14 +63,15 @@ RTL Directory
 └─────────────┘                                          │
                                                          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Analyzer (pyslang)                                          │
-│    Per file extracts:                                        │
-│      - package declarations  (PackageDeclaration)            │
-│      - package imports       (PackageImportDeclaration)      │
-│      - module declarations   (ModuleDeclaration)             │
-│      - module instantiations (HierarchyInstantiation)        │
-│      - `include directives   (IncludeStatement)              │
-│      - `define / `ifdef macros                               │
+│  Analyzer (tree-sitter-systemverilog)                        │
+│    Per file extracts (all as AST nodes, no regex):           │
+│      - package declarations  (package_declaration)           │
+│      - package imports       (package_import_item)           │
+│      - module declarations   (module_declaration)            │
+│      - module instantiations (module_instantiation)          │
+│      - `include directives   (include_compiler_directive)    │
+│      - `define macros        (text_macro_definition)         │
+│      - `ifdef/`ifndef        (conditional_compilation_dir.)  │
 └───────────────────────────┬──────────────────────────────────┘
                             │  FileInfo list
                             ▼
@@ -165,9 +166,11 @@ class FileInfo:
     used_macros: list[str]           # `ifdef / `ifndef referenced names
 ```
 
-Uses `pyslang.SyntaxTree.fromFile(path)` and walks the AST via `SyntaxKind`
-enum. One `FileInfo` per source file. Header-only files (`.svh`) are also
-analyzed for macro definitions.
+Uses `tree-sitter-systemverilog` to parse raw file bytes. All preprocessor
+directives (`include, `define, `ifdef) appear as first-class AST nodes — no
+regex needed. `gate_instantiation` and `module_instantiation` are distinct node
+types, so gate primitives are never mistaken for module dependencies. One
+`FileInfo` per source file; header files (`.svh`) are also analyzed for macros.
 
 ### 4.3 `gen/graph.py`
 
@@ -333,12 +336,14 @@ usages:
 ```toml
 [project.dependencies]
 # existing ...
-"pyslang>=7.0",
+"tree-sitter>=0.25",
+"tree-sitter-systemverilog>=0.3",
 "anthropic>=0.25",
 "pyyaml>=6.0",
 ```
 
-`tree-sitter-systemverilog` is **not** added (pyslang covers our needs more accurately).
+`pyslang` is **not** used — tree-sitter-systemverilog handles all SV dependency
+extraction including preprocessor directives as first-class AST nodes.
 
 ---
 
