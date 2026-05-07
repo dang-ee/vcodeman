@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 
 import click
-import anthropic
-
 from vcodeman._version import __version__
 
 
@@ -164,16 +162,10 @@ def gen(ctx, rtl_dir, output, top, simulator, max_iter, no_compile, no_ai, no_co
             use_ai=not no_ai,
             no_comments=no_comments,
         )
-    except anthropic.AuthenticationError as e:
-        click.secho(
-            f"Error: ANTHROPIC_API_KEY is missing or invalid. Set it before using AI repair.\n  {e}",
-            fg='red', err=True,
-        )
-        sys.exit(1)
     except Exception as e:
-        if "ANTHROPIC_API_KEY" in str(e) or "api_key" in str(e).lower():
+        if "not logged in" in str(e).lower() or "CLINotFoundError" in type(e).__name__:
             click.secho(
-                f"Error: ANTHROPIC_API_KEY is missing or invalid.\n  {e}",
+                f"Error: Claude Code is not logged in or not installed. Run `claude login` first.\n  {e}",
                 fg='red', err=True,
             )
             sys.exit(1)

@@ -1,11 +1,8 @@
 """RTL filelist auto-generator."""
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-
-import anthropic
 
 from vcodeman.gen.analyzer import analyze_file
 from vcodeman.gen.compiler import BACKENDS, CompileResult, SimulatorBackend
@@ -110,8 +107,6 @@ def generate(
                          iterations=0, success=False,
                          final_errors=result.errors)
 
-    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
-
     file_headers: dict = {
         fi.path: "\n".join(fi.path.read_text(errors="replace").splitlines()[:30])
         for fi in src_infos
@@ -120,7 +115,6 @@ def generate(
     from vcodeman.gen.ai_repair import repair_filelist
     for iteration in range(1, max_iter + 1):
         corrected = repair_filelist(
-            client=client,
             current_filelist=output.read_text(),
             errors=result.errors,
             file_headers=file_headers,

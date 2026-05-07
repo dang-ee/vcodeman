@@ -1,6 +1,8 @@
+import asyncio
 from pathlib import Path
 
-import anthropic
+from claude_agent_sdk import ClaudeAgentOptions, query
+from claude_agent_sdk.types import AssistantMessage, TextBlock
 
 from vcodeman.gen.compiler import CompileError
 
@@ -21,21 +23,39 @@ class AIRepairError(Exception):
     pass
 
 
+async def _call_claude(user_message: str, model: str | None) -> str:
+    options = ClaudeAgentOptions(
+        system_prompt=_SYSTEM_PROMPT,
+        allowed_tools=[],
+        permission_mode="bypassPermissions",
+        model=model,
+    )
+    parts: list[str] = []
+    async for message in query(prompt=user_message, options=options):
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    parts.append(block.text)
+    if not parts:
+        raise AIRepairError("No text response received from Claude")
+    return "".join(parts)
+
+
 def repair_filelist(
-    client: anthropic.Anthropic,
     current_filelist: str,
     errors: list[CompileError],
     file_headers: dict[Path, str],
-    model: str = "claude-sonnet-4-6",
+    model: str | None = None,
 ) -> str:
-    """Call Claude API once to get a corrected filelist.
+    """Call Claude (via Claude Agent SDK) once to get a corrected filelist.
+
+    Uses the local Claude Code session — no API key required.
 
     Args:
-        client: Anthropic client instance.
         current_filelist: current .f file content.
         errors: structured compiler errors from this iteration.
         file_headers: mapping of file path -> first 30 lines of source.
-        model: Claude model to use.
+        model: Claude model override (None = use Claude Code's configured model).
 
     Returns:
         Corrected .f file content as a string.
@@ -44,25 +64,13 @@ def repair_filelist(
         f"  {e.file}:{e.line}: {e.message}" if e.file else f"  {e.message}"
         for e in errors
     )
-
     headers_block = "\n\n".join(
         f"=== {path.name} ===\n{content}"
         for path, content in file_headers.items()
     )
-
     user_message = (
         f"Compilation failed with the following errors:\n{error_block}\n\n"
         f"Current filelist:\n{current_filelist}\n\n"
         f"File headers (first 30 lines each):\n{headers_block}"
     )
-
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    first_block = response.content[0]
-    if hasattr(first_block, 'text'):
-        return first_block.text  # type: ignore[attr-defined]
-    raise AIRepairError(f"Unexpected response type: {type(first_block)}")
+    return asyncio.run(_call_claude(user_message, model))
