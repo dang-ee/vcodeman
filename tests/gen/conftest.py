@@ -7,3 +7,8 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture
 def simple_dir() -> Path:
     return FIXTURES_DIR / "simple"
+
+
+@pytest.fixture
+def cpu_dir() -> Path:
+    return FIXTURES_DIR / "cpu"
