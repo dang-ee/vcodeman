@@ -52,3 +52,11 @@ def test_gate_primitive_not_in_instantiated_modules(tmp_path):
     sv.write_text("module gates (output o, input a, b);\n  and g1 (o, a, b);\nendmodule\n")
     info = analyze_file(sv)
     assert "and" not in info.instantiated_modules
+
+
+def test_analyze_nonansi_module(tmp_path):
+    """Legacy Verilog-1995 non-ANSI port style must be recognized."""
+    sv = tmp_path / "nonansi.v"
+    sv.write_text("module legacy(a, b);\n  input a;\n  output b;\n  assign b = a;\nendmodule\n")
+    info = analyze_file(sv)
+    assert "legacy" in info.declared_modules

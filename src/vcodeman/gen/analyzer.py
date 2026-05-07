@@ -62,13 +62,15 @@ def analyze_file(path: Path) -> FileInfo:
         if ident:
             info.declared_packages.append(_text(ident))
 
-    # Module declarations
+    # Module declarations (ANSI and non-ANSI / Verilog-1995 style)
     for mod in _find_all(root, "module_declaration"):
-        header = _first_child(mod, "module_ansi_header")
-        if header:
-            ident = _first_child(header, "simple_identifier")
-            if ident:
-                info.declared_modules.append(_text(ident))
+        for header_type in ("module_ansi_header", "module_nonansi_header"):
+            header = _first_child(mod, header_type)
+            if header:
+                ident = _first_child(header, "simple_identifier")
+                if ident:
+                    info.declared_modules.append(_text(ident))
+                break
 
     # Package imports (anywhere in file)
     for item in _find_all(root, "package_import_item"):

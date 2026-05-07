@@ -1,6 +1,5 @@
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from vcodeman.gen.ai_repair import repair_filelist, AIRepairError
 from vcodeman.gen.compiler import CompileError
 
@@ -47,13 +46,8 @@ def test_repair_prompt_contains_errors():
     assert "undeclared identifier" in user_msg
 
 
-def test_repair_raises_on_missing_api_key(tmp_path):
-    with patch.dict(os.environ, {}, clear=True):
-        with patch("anthropic.Anthropic") as mock_anthropic:
-            mock_anthropic.side_effect = Exception("ANTHROPIC_API_KEY not set")
-            try:
-                from vcodeman.gen import ai_repair
-                import importlib
-                importlib.reload(ai_repair)
-            except Exception:
-                pass
+def test_ai_repair_module_importable():
+    """Module must be importable and export expected symbols."""
+    from vcodeman.gen.ai_repair import repair_filelist, AIRepairError
+    assert callable(repair_filelist)
+    assert issubclass(AIRepairError, Exception)
