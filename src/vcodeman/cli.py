@@ -127,6 +127,59 @@ def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts, incdi
         sys.exit(1)
 
 
+@cli.command()
+@click.argument('rtl_dir', type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option('-o', '--output', type=click.Path(path_type=Path), help='Output .f path (default: <rtl-dir>/out.f)')
+@click.option('--top', default=None, help='Force top module name')
+@click.option('--simulator', default='icarus', type=click.Choice(['icarus'], case_sensitive=False), help='Simulator backend')
+@click.option('--max-iter', default=5, show_default=True, help='Max AI repair iterations')
+@click.option('--no-compile', is_flag=True, help='Skip compilation check')
+@click.option('--no-ai', is_flag=True, help='Disable AI repair loop')
+@click.option('--no-comments', is_flag=True, help='Strip comments from output')
+@click.pass_context
+def gen(ctx, rtl_dir, output, top, simulator, max_iter, no_compile, no_ai, no_comments):
+    """Generate a compilable filelist from an RTL directory.
+
+    Example: vcodeman gen ./rtl -o out.f
+    """
+    from vcodeman.gen import generate
+
+    quiet = ctx.obj.get('quiet', False) if ctx.obj else False
+
+    if output is None:
+        output = rtl_dir / 'out.f'
+
+    if not quiet:
+        click.echo(f"Scanning: {rtl_dir}", err=True)
+
+    result = generate(
+        rtl_dir=rtl_dir,
+        output=output,
+        top=top,
+        simulator=simulator,
+        max_iter=max_iter,
+        do_compile=not no_compile,
+        use_ai=not no_ai,
+        no_comments=no_comments,
+    )
+
+    if result.success:
+        if not quiet:
+            click.echo(f"Filelist: {result.filelist_path}", err=True)
+            click.echo(f"Tops:     {result.tops_path}", err=True)
+            click.echo(f"Macros:   {result.macros_path}", err=True)
+            if result.top_module:
+                click.echo(f"Top:      {result.top_module}", err=True)
+            if result.iterations > 0:
+                click.echo(f"Resolved in {result.iterations} AI iteration(s)", err=True)
+    else:
+        click.secho("Error: compilation failed after all iterations", fg='red', err=True)
+        if result.final_errors:
+            for e in result.final_errors[:10]:
+                click.echo(f"  {e.raw}", err=True)
+        sys.exit(1)
+
+
 def _export_sqlite(result, output_path: Path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
