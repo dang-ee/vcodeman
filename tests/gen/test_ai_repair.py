@@ -1,9 +1,9 @@
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from vcodeman.gen.ai_repair import AIRepairError, repair_filelist
+from vcodeman.gen.ai_repair import AIRepairError, _extract_filelist, repair_filelist
 from vcodeman.gen.compiler import CompileError
 
 _ERRORS = [CompileError(file="/rtl/mod.sv", line=5,
@@ -71,3 +71,74 @@ def test_ai_repair_module_importable():
     from vcodeman.gen.ai_repair import AIRepairError, repair_filelist
     assert callable(repair_filelist)
     assert issubclass(AIRepairError, Exception)
+
+
+# --- _extract_filelist unit tests ---
+
+def test_extract_filelist_clean_input_passes_through():
+    raw = "+incdir+/a/inc\n/a/pkg.sv\n/a/mod.sv\n"
+    assert _extract_filelist(raw) == raw
+
+
+def test_extract_filelist_strips_markdown_fence():
+    raw = "```\n+incdir+/a/inc\n/a/mod.sv\n```\n"
+    assert _extract_filelist(raw) == "+incdir+/a/inc\n/a/mod.sv\n"
+
+
+def test_extract_filelist_strips_fenced_with_language():
+    raw = "```systemverilog\n/a/pkg.sv\n/a/mod.sv\n```"
+    assert _extract_filelist(raw) == "/a/pkg.sv\n/a/mod.sv\n"
+
+
+def test_extract_filelist_drops_leading_prose():
+    raw = (
+        "Here is the corrected filelist:\n"
+        "\n"
+        "+incdir+/a/inc\n"
+        "/a/mod.sv\n"
+    )
+    out = _extract_filelist(raw)
+    assert "Here is" not in out
+    assert "+incdir+/a/inc" in out
+    assert "/a/mod.sv" in out
+
+
+def test_extract_filelist_drops_trailing_prose():
+    raw = "/a/mod.sv\nThis filelist is now fixed.\n"
+    out = _extract_filelist(raw)
+    assert "/a/mod.sv" in out
+    assert "fixed" not in out
+
+
+def test_extract_filelist_keeps_comments_and_blanks():
+    raw = "// header\n\n/a/pkg.sv\n// section\n/a/mod.sv\n"
+    out = _extract_filelist(raw)
+    assert "// header" in out
+    assert "// section" in out
+    assert "/a/pkg.sv" in out
+
+
+def test_extract_filelist_keeps_top_flag():
+    raw = "/a/mod.sv\n-top tb_top\n"
+    assert _extract_filelist(raw) == "/a/mod.sv\n-top tb_top\n"
+
+
+def test_extract_filelist_raises_on_pure_prose():
+    raw = "I cannot help with that request.\nPlease provide more context.\n"
+    with pytest.raises(AIRepairError, match="no recognizable filelist content"):
+        _extract_filelist(raw)
+
+
+def test_extract_filelist_raises_on_comments_only():
+    # Comments alone are not a usable filelist.
+    raw = "// just a comment\n// another comment\n"
+    with pytest.raises(AIRepairError):
+        _extract_filelist(raw)
+
+
+def test_extract_filelist_handles_unclosed_fence():
+    # If Claude opens a fence but never closes it, we still extract the inner content.
+    raw = "```\n/a/pkg.sv\n/a/mod.sv\n"
+    out = _extract_filelist(raw)
+    assert "/a/pkg.sv" in out
+    assert "/a/mod.sv" in out

@@ -2,7 +2,8 @@
 
 Strategy:
 1. Scan the cpu fixture (multi-package RISC-V-subset CPU design)
-2. Generate a *deliberately broken* filelist (sources in reverse order, packages missing)
+2. Generate a *deliberately broken* filelist (all files in reverse dependency
+   order, +incdir+ at the end instead of the top)
 3. Verify it fails compilation
 4. Run repair_filelist() against real Claude
 5. Verify the repaired filelist compiles cleanly

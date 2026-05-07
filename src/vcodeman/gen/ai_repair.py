@@ -29,39 +29,52 @@ class AIRepairError(Exception):
     pass
 
 
+# Lines that look like valid .f file content: absolute paths, directives,
+# // comments, or blank lines. Anything else (prose, markdown, etc.) is dropped.
+_VALID_LINE = re.compile(
+    r"""^\s*(?:
+        /                        # absolute paths or // comments
+      | \+incdir\+               # incdir directive
+      | \+define\+               # define directive
+      | -(?:f|v|y|top|s)(?:\s|$) # common flags (may be at end of line)
+      | //                       # comment
+      |$                         # blank line
+    )""",
+    re.VERBOSE,
+)
+
+
 def _extract_filelist(raw: str) -> str:
-    """Strip markdown fences and prose from a Claude response, leaving only .f content."""
+    """Strip markdown fences and prose from a Claude response, leaving only .f content.
+
+    Raises:
+        AIRepairError: when no recognizable filelist content remains.
+    """
     lines = raw.splitlines()
 
-    # If response is wrapped in a code fence, extract just the inner content
+    # If response is wrapped in a code fence, extract just the inner content.
+    # If the closing fence is missing we still take the rest of the response —
+    # the line-level filter below will discard any trailing prose.
     if lines and lines[0].strip().startswith("```"):
         inner: list[str] = []
         for line in lines[1:]:
             if line.strip().startswith("```"):
                 break
             inner.append(line)
-        if inner:
-            lines = inner
+        lines = inner
 
-    # Keep only lines that look like valid .f file content:
-    # - absolute paths (start with /)
-    # - +incdir+, +define+, -f, -v, -y, -top directives
-    # - // comments
-    # - blank lines
-    # Discard: prose sentences, markdown, etc.
-    _VALID_LINE = re.compile(
-        r"""^\s*(?:
-            /           # absolute paths or // comments
-          | \+incdir\+  # incdir directive
-          | \+define\+  # define directive
-          | -(?:f|v|y|top|s)(?:\s|$)  # common flags (may be at end of line)
-          | //          # comment
-          |$            # blank line
-        )""",
-        re.VERBOSE,
-    )
     kept = [ln for ln in lines if _VALID_LINE.match(ln)]
-    return "\n".join(kept) + "\n" if kept else raw
+
+    # A filelist needs at least one path or directive line — pure comments/blanks
+    # would not produce any meaningful compilable input.
+    has_content = any(ln.strip() and not ln.lstrip().startswith("//") for ln in kept)
+    if not has_content:
+        raise AIRepairError(
+            "Claude response contained no recognizable filelist content. "
+            f"Raw response:\n{raw[:500]}"
+        )
+
+    return "\n".join(kept) + "\n"
 
 
 async def _call_claude(user_message: str, model: str | None) -> str:
