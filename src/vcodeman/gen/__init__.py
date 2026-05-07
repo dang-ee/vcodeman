@@ -50,8 +50,9 @@ def generate(
 
     # 3. Build order
     ordered = build_order(src_infos)
-    pkg_files = [fi.path for fi in src_infos if fi.declared_packages]
-    non_pkg_ordered = [p for p in ordered if p not in set(pkg_files)]
+    pkg_path_set = {fi.path for fi in src_infos if fi.declared_packages}
+    pkg_files = [p for p in ordered if p in pkg_path_set]
+    non_pkg_ordered = [p for p in ordered if p not in pkg_path_set]
 
     # 4. Detect tops
     candidates = detect_tops(src_infos)
