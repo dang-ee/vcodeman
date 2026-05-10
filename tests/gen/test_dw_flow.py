@@ -134,3 +134,42 @@ def test_compile_step_records_result(tmp_path):
     assert "success" in payload and "errors" in payload
     assert payload["success"] is True
     assert result["success"] is True
+
+
+def test_repair_step_uses_run_agent_and_post_processes(tmp_path, monkeypatch):
+    from vcodeman.gen.dw_flow import flow as flow_mod
+
+    cfg = flow_mod.StepCfg(rtl_dir=str(_cpu_fixture_dir()))
+    (tmp_path / "analyze").mkdir()
+    flow_mod.analyze_step(cfg, _make_ctx(tmp_path / "analyze"))
+
+    compile_dir = tmp_path / "compile_0"
+    compile_dir.mkdir()
+    (compile_dir / "cpu.f").write_text("/some/wrong.sv\n")
+    (compile_dir / "result.json").write_text(json.dumps({
+        "success": False,
+        "errors": [{"file": "/some/wrong.sv", "line": 1,
+                    "message": "syntax error", "raw": "..."}],
+        "stderr": "",
+    }))
+
+    def fake_run_agent(pkg, *, user_prompt, agent_dir, cwd, env):
+        return "```\n+incdir+/x/inc\n/x/pkg.sv\n/x/mod.sv\n```\n"
+
+    monkeypatch.setattr(flow_mod, "run_agent", fake_run_agent)
+
+    repair_dir = tmp_path / "repair_1"
+    repair_dir.mkdir()
+    ctx = _make_ctx(repair_dir)
+    ctx.run_root = tmp_path
+    ctx.previous_compile_dir = compile_dir
+
+    flow_mod.repair_step(cfg, ctx)
+
+    assert (repair_dir / "prompt.txt").is_file()
+    assert "syntax error" in (repair_dir / "prompt.txt").read_text()
+
+    cpu_f = (repair_dir / "cpu.f").read_text()
+    assert "```" not in cpu_f, "markdown fence must be stripped"
+    assert "+incdir+/x/inc" in cpu_f
+    assert "/x/pkg.sv" in cpu_f

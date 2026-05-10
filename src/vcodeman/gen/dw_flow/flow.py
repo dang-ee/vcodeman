@@ -113,7 +113,12 @@ def analyze_step(cfg: StepCfg, ctx: Context) -> dict:
     return {"top": best_top, "n_files": len(src_infos)}
 
 
+from dw._step_env import resolve_step_env
+from dw.claude_agent.config import load_agent
+from dw.claude_agent.runner import run_agent
+
 from vcodeman.gen.compiler import BACKENDS, CompileError
+from vcodeman.gen.dw_flow.repair import build_user_message, extract_filelist
 from vcodeman.gen.writer import render_filelist
 
 
@@ -190,3 +195,42 @@ def compile_step(cfg: StepCfg, ctx: Context) -> dict:
         (step_dir / "stderr.log").write_text(result.stderr)
 
     return {"success": result.success, "n_errors": len(result.errors)}
+
+
+@task(cache_policy=NO_CACHE, task_run_name=step_label)
+def repair_step(cfg: StepCfg, ctx: Context) -> dict:
+    """Call repair_filelist agent on the previous compile's failure.
+
+    Reads ctx.previous_compile_dir/{cpu.f, result.json} +
+    analyze/file_headers.json, builds a prompt, invokes run_agent,
+    post-processes via extract_filelist, and writes corrected cpu.f.
+    """
+    step_dir = ctx.step_dir.path
+    prev = Path(ctx.previous_compile_dir)
+    analyze_dir = _analyze_dir(ctx)
+
+    current_filelist = (prev / "cpu.f").read_text()
+    result_payload = json.loads((prev / "result.json").read_text())
+    errors = [
+        CompileError(file=e["file"], line=e["line"],
+                     message=e["message"], raw=e["raw"])
+        for e in result_payload["errors"]
+    ]
+    headers_raw = json.loads((analyze_dir / "file_headers.json").read_text())
+    file_headers = {Path(k): v for k, v in headers_raw.items()}
+
+    user_message = build_user_message(current_filelist, errors, file_headers)
+    (step_dir / "prompt.txt").write_text(user_message)
+
+    pkg = load_agent("agents/repair_filelist", manifest_dir=ctx.manifest_dir)
+    se = resolve_step_env(ctx, step=step_dir.name, workdir=str(step_dir))
+    raw = run_agent(
+        pkg,
+        user_prompt=user_message,
+        agent_dir=step_dir,
+        cwd=step_dir,
+        env=se.env,
+    )
+    corrected = extract_filelist(raw)
+    (step_dir / "cpu.f").write_text(corrected)
+    return {"step_dir": str(step_dir)}
