@@ -72,3 +72,6 @@ dmypy.json
 # Project specific
 *.tmp
 *.bak
+
+# dw run artifacts
+runs/

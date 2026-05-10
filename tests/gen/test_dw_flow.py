@@ -103,7 +103,9 @@ def test_render_step_produces_filelist(tmp_path):
     assert "base_pkg.sv" in text
 
 
+import os
 import shutil
+import subprocess
 
 
 @pytest.mark.skipif(not shutil.which("eda-env"), reason="eda-env not available")
@@ -173,3 +175,50 @@ def test_repair_step_uses_run_agent_and_post_processes(tmp_path, monkeypatch):
     assert "```" not in cpu_f, "markdown fence must be stripped"
     assert "+incdir+/x/inc" in cpu_f
     assert "/x/pkg.sv" in cpu_f
+
+
+def _find_step_dir(run_dir: Path, label: str) -> Path | None:
+    """Find a numbered step dir like '03.compile_0' by its label suffix."""
+    matches = [d for d in run_dir.iterdir() if d.is_dir() and d.name.endswith(f".{label}")]
+    return matches[0] if matches else None
+
+
+@pytest.mark.skipif(not shutil.which("eda-env"), reason="eda-env not available")
+def test_full_flow_via_dw_run_no_ai(tmp_path):
+    """Layer 2: real dw subprocess, --no-ai (no Claude needed)."""
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+
+    env = {
+        **os.environ,
+        "VCM_RTL_DIR": str(_cpu_fixture_dir()),
+        "VCM_TOP": "",
+        "VCM_SIMULATOR": "icarus",
+        "VCM_MAX_ITER": "5",
+        "VCM_USE_AI": "0",
+        "DW_RUNS_DIR": str(runs_dir),
+    }
+    completed = subprocess.run(
+        ["uv", "run", "dw", "run", str(FLOW_PY)],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, (
+        f"dw run failed:\nstdout:{completed.stdout}\nstderr:{completed.stderr}"
+    )
+
+    run_dirs = list(runs_dir.iterdir())
+    assert len(run_dirs) == 1, f"expected 1 run_dir, got {run_dirs}"
+    run_dir = run_dirs[0]
+
+    analyze_d = _find_step_dir(run_dir, "analyze")
+    render_d = _find_step_dir(run_dir, "render")
+    compile_0_d = _find_step_dir(run_dir, "compile_0")
+    repair_1_d = _find_step_dir(run_dir, "repair_1")
+
+    assert analyze_d is not None and analyze_d.is_dir(), "missing analyze step dir"
+    assert render_d is not None and render_d.is_dir(), "missing render step dir"
+    assert compile_0_d is not None and compile_0_d.is_dir(), "missing compile_0 step dir"
+    assert repair_1_d is None, "use_ai=False must skip repair"
+
+    final = json.loads((compile_0_d / "result.json").read_text())
+    assert final["success"] is True

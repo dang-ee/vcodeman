@@ -42,7 +42,47 @@ def main(ctx: dw.Context) -> str:
         max_iter=int(os.environ.get("VCM_MAX_ITER", "5")),
         use_ai=os.environ.get("VCM_USE_AI", "1") == "1",
     )
-    return f"cfg={cfg.model_dump()}"
+
+    analyze_ctx = ctx.for_step(label="analyze")
+    analyze_step(cfg, analyze_ctx)
+    analyze_dir = analyze_ctx.step_dir.path
+    run_root = analyze_dir.parent
+
+    render_ctx = ctx.for_step(label="render")
+    render_ctx.run_root = run_root
+    render_ctx.analyze_dir = analyze_dir
+    render_step(cfg, render_ctx)
+
+    if cfg.max_iter == 0:
+        return "skipped_compile"
+
+    compile_ctx_0 = ctx.for_step(label="compile_0")
+    compile_ctx_0.run_root = run_root
+    compile_ctx_0.analyze_dir = analyze_dir
+    compile_ctx_0.previous_filelist_dir = render_ctx.step_dir.path
+    result = compile_step(cfg, compile_ctx_0)
+
+    if not cfg.use_ai:
+        return f"no_ai (success={result['success']})"
+
+    last_compile_dir = compile_ctx_0.step_dir.path
+    for i in range(1, cfg.max_iter + 1):
+        if result["success"]:
+            break
+        repair_ctx = ctx.for_step(label=f"repair_{i}")
+        repair_ctx.run_root = run_root
+        repair_ctx.analyze_dir = analyze_dir
+        repair_ctx.previous_compile_dir = last_compile_dir
+        repair_step(cfg, repair_ctx)
+
+        compile_ctx = ctx.for_step(label=f"compile_{i}")
+        compile_ctx.run_root = run_root
+        compile_ctx.analyze_dir = analyze_dir
+        compile_ctx.previous_filelist_dir = repair_ctx.step_dir.path
+        result = compile_step(cfg, compile_ctx)
+        last_compile_dir = compile_ctx.step_dir.path
+
+    return f"final (success={result['success']})"
 
 
 import json
@@ -123,13 +163,14 @@ from vcodeman.gen.writer import render_filelist
 
 
 def _analyze_dir(ctx: Context) -> Path:
-    """Locate the analyze step's directory under the run_root.
+    """Locate the analyze step's directory.
 
-    By dw convention, ctx.run_root is the parent of all step dirs, and
-    each step dir is named after its label. analyze_step's label is
-    'analyze'. Tests set ctx.run_root directly; in real flow runs it's
-    attached to each step's Context by main().
+    main() sets ctx.analyze_dir to the exact numbered path (e.g. 01.analyze/).
+    Unit tests set ctx.run_root and fall back to run_root/analyze.
     """
+    val = getattr(ctx, "analyze_dir", None)
+    if isinstance(val, (str, Path)):
+        return Path(val)
     return Path(ctx.run_root) / "analyze"
 
 
