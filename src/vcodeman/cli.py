@@ -148,13 +148,14 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
     import shutil
     import subprocess
 
-    # Use PWD env var (preserved by uv --directory) to get the true original cwd
-    orig_cwd = Path(os.environ.get('PWD', '.'))
+    if not shutil.which("dw"):
+        click.secho("dw CLI not found on PATH. Install design-workflow.", fg="red", err=True)
+        sys.exit(1)
 
+    cwd = Path(os.getcwd())
     flow_py = Path(__file__).parent / "gen" / "dw_flow" / "flow.py"
-    # Resolve relative paths against the original working directory
-    output = (orig_cwd / output).resolve() if not Path(output).is_absolute() else Path(output).resolve()
-    runs_dir = (orig_cwd / runs_dir).resolve() if not Path(runs_dir).is_absolute() else Path(runs_dir).resolve()
+    output = Path(output) if Path(output).is_absolute() else (cwd / output).resolve()
+    runs_dir = Path(runs_dir) if Path(runs_dir).is_absolute() else (cwd / runs_dir).resolve()
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     env = {
