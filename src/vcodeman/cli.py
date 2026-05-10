@@ -148,8 +148,13 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
     import shutil
     import subprocess
 
+    # Use PWD env var (preserved by uv --directory) to get the true original cwd
+    orig_cwd = Path(os.environ.get('PWD', '.'))
+
     flow_py = Path(__file__).parent / "gen" / "dw_flow" / "flow.py"
-    runs_dir = Path(runs_dir).resolve()
+    # Resolve relative paths against the original working directory
+    output = (orig_cwd / output).resolve() if not Path(output).is_absolute() else Path(output).resolve()
+    runs_dir = (orig_cwd / runs_dir).resolve() if not Path(runs_dir).is_absolute() else Path(runs_dir).resolve()
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     env = {
