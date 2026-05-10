@@ -126,65 +126,83 @@ def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts, incdi
         sys.exit(1)
 
 
-@cli.command()
-@click.argument('rtl_dir', type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.option('-o', '--output', type=click.Path(path_type=Path), help='Output .f path (default: <rtl-dir>/out.f)')
-@click.option('--top', default=None, help='Force top module name')
-@click.option('--simulator', default='icarus', type=click.Choice(['icarus'], case_sensitive=False), help='Simulator backend')
-@click.option('--max-iter', default=5, show_default=True, help='Max AI repair iterations')
-@click.option('--no-compile', is_flag=True, help='Skip compilation check')
-@click.option('--no-ai', is_flag=True, help='Disable AI repair loop')
-@click.option('--no-comments', is_flag=True, help='Strip comments from output')
-@click.pass_context
-def gen(ctx, rtl_dir, output, top, simulator, max_iter, no_compile, no_ai, no_comments):
-    """Generate a compilable filelist from an RTL directory.
+@cli.command("gen")
+@click.argument("rtl_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=Path("./out.f"),
+              show_default=True, help="Output filelist path.")
+@click.option("-t", "--top", type=str, default="", show_default=False,
+              help="Top module name (default: auto-detect).")
+@click.option("--simulator", type=str, default="icarus", show_default=True,
+              help="Simulator backend.")
+@click.option("--max-iter", type=int, default=5, show_default=True,
+              help="Max repair iterations.")
+@click.option("--runs-dir", type=click.Path(path_type=Path), default=Path("./runs"),
+              show_default=True, help="Parent dir for dw run_dirs.")
+@click.option("--no-compile", is_flag=True, help="Skip compile + AI repair.")
+@click.option("--no-ai", is_flag=True, help="Compile but skip AI repair on failure.")
+def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_ai):
+    """Generate a SystemVerilog filelist from RTL_DIR."""
+    import json
+    import os
+    import re
+    import shutil
+    import subprocess
 
-    Example: vcodeman gen ./rtl -o out.f
-    """
-    from vcodeman.gen import generate
+    flow_py = Path(__file__).parent / "gen" / "dw_flow" / "flow.py"
+    runs_dir = Path(runs_dir).resolve()
+    runs_dir.mkdir(parents=True, exist_ok=True)
 
-    quiet = ctx.obj.get('quiet', False) if ctx.obj else False
+    env = {
+        **os.environ,
+        "VCM_RTL_DIR": str(Path(rtl_dir).resolve()),
+        "VCM_TOP": top,
+        "VCM_SIMULATOR": simulator,
+        "VCM_MAX_ITER": "0" if no_compile else str(max_iter),
+        "VCM_USE_AI": "0" if (no_ai or no_compile) else "1",
+        "DW_RUNS_DIR": str(runs_dir),
+    }
+    completed = subprocess.run(["dw", "run", str(flow_py)], env=env, check=False)
+    if completed.returncode != 0:
+        click.secho(f"dw run failed (exit {completed.returncode}).", fg="red", err=True)
+        sys.exit(completed.returncode)
 
-    if output is None:
-        output = rtl_dir / 'out.f'
+    # Find the run_dir just created (most recent mtime in runs_dir)
+    run_dir = max(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime)
 
-    if not quiet:
-        click.echo(f"Scanning: {rtl_dir}", err=True)
+    # dw names step dirs as NN.label (e.g. 01.analyze, 03.compile_0).
+    def _find_one(pattern: str) -> Path:
+        rx = re.compile(pattern)
+        matches = [p for p in run_dir.iterdir() if rx.fullmatch(p.name)]
+        if not matches:
+            raise click.ClickException(f"no step dir matching {pattern} under {run_dir}")
+        return matches[0]
 
-    try:
-        result = generate(
-            rtl_dir=rtl_dir,
-            output=output,
-            top=top,
-            simulator=simulator,
-            max_iter=max_iter,
-            do_compile=not no_compile,
-            use_ai=not no_ai,
-            no_comments=no_comments,
-        )
-    except Exception as e:
-        if "not logged in" in str(e).lower() or "CLINotFoundError" in type(e).__name__:
-            click.secho(
-                f"Error: Claude Code is not logged in or not installed. Run `claude login` first.\n  {e}",
-                fg='red', err=True,
-            )
-            sys.exit(1)
-        raise
+    def _find_last_compile() -> Path:
+        rx = re.compile(r"\d+\.compile_(\d+)")
+        matches = [(int(m.group(1)), p) for p in run_dir.iterdir()
+                   if (m := rx.fullmatch(p.name))]
+        if not matches:
+            raise click.ClickException(f"no compile_N step under {run_dir}")
+        return max(matches, key=lambda t: t[0])[1]
 
-    if result.success:
-        if not quiet:
-            click.echo(f"Filelist: {result.filelist_path}", err=True)
-            click.echo(f"Tops:     {result.tops_path}", err=True)
-            click.echo(f"Macros:   {result.macros_path}", err=True)
-            if result.top_module:
-                click.echo(f"Top:      {result.top_module}", err=True)
-            if result.iterations > 0:
-                click.echo(f"Resolved in {result.iterations} AI iteration(s)", err=True)
+    if no_compile:
+        src_cpu_f = _find_one(r"\d+\.render") / "cpu.f"
+        success = True
     else:
-        click.secho("Error: compilation failed after all iterations", fg='red', err=True)
-        if result.final_errors:
-            for e in result.final_errors[:10]:
-                click.echo(f"  {e.raw}", err=True)
+        last = _find_last_compile()
+        src_cpu_f = last / "cpu.f"
+        success = json.loads((last / "result.json").read_text())["success"]
+
+    analyze_dir = _find_one(r"\d+\.analyze")
+    shutil.copy(src_cpu_f, output)
+    shutil.copy(analyze_dir / "tops.txt", f"{output}.tops.txt")
+    shutil.copy(analyze_dir / "macros.yaml", f"{output}.macros.yaml")
+
+    if success:
+        click.echo(f"Generated: {output}  (debug: {run_dir})")
+    else:
+        click.secho("Compile still failing after AI repair.", fg="red", err=True)
+        click.echo(f"  resume: dw resume {run_dir}", err=True)
         sys.exit(1)
 
 
