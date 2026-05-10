@@ -271,7 +271,7 @@ Options:
 |---|---|---|
 | `-o, --output PATH` | `./out.f` | Output filelist path. Sidecars (`.tops.txt`, `.macros.yaml`) land beside it. |
 | `-t, --top NAME` | auto-detect | Force a specific top module. |
-| `--simulator NAME` | `icarus` | Compiler backend. See "Adding a simulator backend" below. |
+| `--simulator NAME\|PATH` | `icarus` | Compiler backend name or path to a `.py` file. See "Adding a simulator backend" below. |
 | `--max-iter N` | `5` | Cap on automatic repair attempts. |
 | `--no-compile` | off | Static analysis only; don't compile, don't repair. |
 | `--no-ai` | off | Compile once; on failure, exit without asking Claude. |
@@ -303,20 +303,35 @@ want Claude in the loop, or if you're running headless.
 
 ## Adding a simulator backend
 
-`vcodeman gen` ships with one backend (`icarus`, via `eda-env iverilog`).
-To support another simulator (Verilator, VCS, Xcelium, …), edit
-`src/vcodeman/gen/compiler.py`:
+`vcodeman gen` ships with one built-in backend (`icarus`). Two ways to
+add another:
 
-1. Subclass `SimulatorBackend` and implement three members:
-   - `name` (class attribute) — the string users pass to `--simulator`.
-   - `compile_cmd(filelist, top_module) -> list[str]` — the argv
-     `subprocess.run` will invoke. Receives the absolute path to the
-     `.f` file and the chosen top (or `None`).
-   - `parse_errors(stdout, stderr, rc) -> list[CompileError]` — turn
-     the simulator's output into structured errors so the AI repair
-     loop has something to work with. Return `[]` on success.
-2. Register the class in the `BACKENDS` dict at the bottom of the
-   file: `BACKENDS["myname"] = MyBackend`.
+**A. Per-invocation `.py` file** — point `--simulator` at any file:
+
+```bash
+vcodeman gen ./rtl --simulator ./backends/verilator.py
+# disambiguate with :ClassName if the file has multiple
+vcodeman gen ./rtl --simulator ./backends/all.py:VerilatorBackend
+```
+
+The file must define a class that subclasses `SimulatorBackend`. No
+package structure required — vcodeman loads the file directly via
+`importlib.util.spec_from_file_location`, so it works fine alongside
+`uv tool install vcodeman`. Single file, dropped anywhere on disk.
+
+**B. Built-in registration** — edit `src/vcodeman/gen/compiler.py`
+and add to `BACKENDS`. Use this if you want the backend shipped with
+vcodeman itself (PR welcome).
+
+In both cases, the class must implement:
+
+- `name` (class attribute) — the string users pass to `--simulator`.
+- `compile_cmd(filelist, top_module) -> list[str]` — the argv
+  `subprocess.run` will invoke. Receives the absolute path to the
+  `.f` file and the chosen top (or `None`).
+- `parse_errors(stdout, stderr, rc) -> list[CompileError]` — turn
+  the simulator's output into structured errors so the AI repair
+  loop has something to work with. Return `[]` on success.
 
 Optional: override `top_directive(module)` to emit a `.f`-file
 directive like `// -top tb_cpu` instead of (or in addition to) a CLI
