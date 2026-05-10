@@ -233,6 +233,130 @@ vcodeman parse top.f \
 
 ---
 
+### 12. Generate a filelist from raw RTL (`vcodeman gen`)
+
+`vcodeman parse` flattens an existing `.f`. `vcodeman gen` is the
+opposite direction — it builds a `.f` from a directory of bare RTL.
+
+```bash
+vcodeman gen ./rtl --output ./build/cpu.f
+```
+
+What it does:
+
+1. Scans `./rtl` recursively for `.sv` / `.v` / `.svh`.
+2. Parses each file with tree-sitter and extracts packages, modules,
+   instantiations, `` `include `` paths, `` `define ``s, and `` `ifdef ``
+   usages.
+3. Builds a dependency graph and topologically sorts the sources
+   (packages first, then submodules, then their parents).
+4. Auto-detects a top module by transitive instance count (override
+   with `--top tb_cpu`).
+5. Compiles the filelist with the configured simulator and, if it
+   fails, asks Claude to reorder/fix it. Retries up to `--max-iter`
+   times.
+6. Writes the final filelist plus two sidecars.
+
+Outputs (next to `--output`):
+
+| File | Contents |
+|---|---|
+| `cpu.f` | The generated filelist |
+| `cpu.f.tops.txt` | Top-module candidates with score, transitive instance count, source file |
+| `cpu.f.macros.yaml` | `` `define `` and `` `ifdef `` report across all files |
+
+Options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-o, --output PATH` | `./out.f` | Output filelist path. Sidecars (`.tops.txt`, `.macros.yaml`) land beside it. |
+| `-t, --top NAME` | auto-detect | Force a specific top module. |
+| `--simulator NAME` | `icarus` | Compiler backend. See "Adding a simulator backend" below. |
+| `--max-iter N` | `5` | Cap on automatic repair attempts. |
+| `--no-compile` | off | Static analysis only; don't compile, don't repair. |
+| `--no-ai` | off | Compile once; on failure, exit without asking Claude. |
+| `--runs-dir PATH` | `./runs` | Where to keep per-step debug artifacts. |
+
+Common patterns:
+
+```bash
+# Fast dry run — no compiler needed at all
+vcodeman gen ./rtl --output ./cpu.f --no-compile
+
+# CI / deterministic — never call Claude
+vcodeman gen ./rtl --output ./cpu.f --no-ai
+
+# Force a specific top
+vcodeman gen ./rtl --output ./cpu.f --top tb_cpu
+```
+
+Each invocation also creates a `./runs/<timestamp>-<id>/` directory
+containing the intermediate artifacts of every step (analysis JSON,
+intermediate filelists, compile error logs, repair prompts and
+responses). It's the place to look first when something goes wrong.
+
+`vcodeman gen` requires Claude Code to be installed and logged in
+when AI repair is enabled (the default). Use `--no-ai` if you don't
+want Claude in the loop, or if you're running headless.
+
+---
+
+## Adding a simulator backend
+
+`vcodeman gen` ships with one backend (`icarus`, via `eda-env iverilog`).
+To support another simulator (Verilator, VCS, Xcelium, …), edit
+`src/vcodeman/gen/compiler.py`:
+
+1. Subclass `SimulatorBackend` and implement three members:
+   - `name` (class attribute) — the string users pass to `--simulator`.
+   - `compile_cmd(filelist, top_module) -> list[str]` — the argv
+     `subprocess.run` will invoke. Receives the absolute path to the
+     `.f` file and the chosen top (or `None`).
+   - `parse_errors(stdout, stderr, rc) -> list[CompileError]` — turn
+     the simulator's output into structured errors so the AI repair
+     loop has something to work with. Return `[]` on success.
+2. Register the class in the `BACKENDS` dict at the bottom of the
+   file: `BACKENDS["myname"] = MyBackend`.
+
+Optional: override `top_directive(module)` to emit a `.f`-file
+directive like `// -top tb_cpu` instead of (or in addition to) a CLI
+flag.
+
+Skeleton (Verilator example):
+
+```python
+class VerilatorBackend(SimulatorBackend):
+    name = "verilator"
+
+    def compile_cmd(self, filelist, top_module=None):
+        cmd = ["verilator", "--lint-only", "-f", str(filelist)]
+        if top_module:
+            cmd.extend(["--top-module", top_module])
+        return cmd
+
+    def parse_errors(self, stdout, stderr, rc):
+        if rc == 0:
+            return []
+        errors = []
+        for line in stderr.splitlines():
+            # Verilator format: %Error: file:line:col: message
+            m = re.match(r"%Error:\s+(.+?):(\d+):(?:\d+:)?\s+(.+)", line)
+            if m:
+                errors.append(CompileError(
+                    file=m.group(1), line=int(m.group(2)),
+                    message=m.group(3), raw=line,
+                ))
+        return errors
+
+
+BACKENDS["verilator"] = VerilatorBackend
+```
+
+The existing `IcarusBackend` (~30 lines in the same file) is the
+canonical reference.
+
+---
+
 ## Filelist syntax reference
 
 `vcodeman` understands the following Verilog-XL constructs:
