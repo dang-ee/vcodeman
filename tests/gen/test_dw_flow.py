@@ -38,3 +38,42 @@ def test_flow_main_reads_env_vars(tmp_path):
     assert cfg.top == "tb_top"
     assert cfg.max_iter == 3
     assert cfg.use_ai is False
+
+
+import json
+from unittest.mock import MagicMock
+
+
+def _make_ctx(step_dir: Path):
+    """Fabricate a minimal Context that step functions can use."""
+    ctx = MagicMock()
+    ctx.step_dir.path = step_dir
+    ctx.manifest_dir = FLOW_PY.parent.resolve()
+    # step_label reads ctx.task_dir.path.name; must be a str not MagicMock
+    ctx.task_dir.path.name = step_dir.name
+    return ctx
+
+
+def _cpu_fixture_dir() -> Path:
+    return Path(__file__).parent / "fixtures" / "cpu"
+
+
+def test_analyze_step_writes_expected_artifacts(tmp_path):
+    from vcodeman.gen.dw_flow.flow import StepCfg, analyze_step
+
+    cfg = StepCfg(rtl_dir=str(_cpu_fixture_dir()))
+    step_dir = tmp_path / "analyze"
+    step_dir.mkdir()
+    ctx = _make_ctx(step_dir)
+
+    analyze_step(cfg, ctx)
+
+    for fname in ("scan_result.json", "ordered.json", "tops.txt",
+                  "macros.yaml", "file_headers.json", "chosen_top.txt"):
+        assert (step_dir / fname).is_file(), f"missing {fname}"
+
+    ordered = json.loads((step_dir / "ordered.json").read_text())
+    assert "packages" in ordered and "non_packages" in ordered
+    assert isinstance(ordered["packages"], list)
+
+    assert (step_dir / "chosen_top.txt").read_text().strip() == "tb_cpu"

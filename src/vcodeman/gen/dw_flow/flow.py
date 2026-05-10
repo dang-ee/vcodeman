@@ -43,3 +43,71 @@ def main(ctx: dw.Context) -> str:
         use_ai=os.environ.get("VCM_USE_AI", "1") == "1",
     )
     return f"cfg={cfg.model_dump()}"
+
+
+import json
+
+from vcodeman.gen.analyzer import analyze_file
+from vcodeman.gen.graph import build_order
+from vcodeman.gen.macro_extractor import build_macro_report, write_macro_yaml
+from vcodeman.gen.scanner import scan
+from vcodeman.gen.top_detector import detect_tops
+
+
+@task(cache_policy=NO_CACHE, task_run_name=step_label)
+def analyze_step(cfg: StepCfg, ctx: Context) -> dict:
+    """Static analysis: scan + analyze + topo + top-detect + macros.
+
+    Outputs (in step_dir):
+      scan_result.json, ordered.json, tops.txt, macros.yaml,
+      file_headers.json, chosen_top.txt
+    """
+    step_dir = ctx.step_dir.path
+    rtl_dir = Path(cfg.rtl_dir)
+
+    scan_result = scan(rtl_dir)
+    all_files = scan_result.source_files + scan_result.header_files
+    infos = [analyze_file(f) for f in all_files]
+    src_set = set(scan_result.source_files)
+    src_infos = [fi for fi in infos if fi.path in src_set]
+
+    ordered = build_order(src_infos)
+    pkg_set = {fi.path for fi in src_infos if fi.declared_packages}
+    pkg_files = [p for p in ordered if p in pkg_set]
+    non_pkg = [p for p in ordered if p not in pkg_set]
+
+    candidates = detect_tops(src_infos)
+    best_top = cfg.top or (candidates[0].module_name if candidates else "")
+
+    (step_dir / "scan_result.json").write_text(json.dumps({
+        "source_files": [str(p) for p in scan_result.source_files],
+        "header_files": [str(p) for p in scan_result.header_files],
+        "include_dirs": [str(p) for p in scan_result.include_dirs],
+    }, indent=2))
+
+    (step_dir / "ordered.json").write_text(json.dumps({
+        "packages": [str(p) for p in pkg_files],
+        "non_packages": [str(p) for p in non_pkg],
+    }, indent=2))
+
+    tops_lines = ["# Top module candidates (best first)\n"]
+    for c in candidates:
+        marker = " <- best" if c.module_name == best_top else ""
+        tops_lines.append(
+            f"{c.module_name:30s}  score={c.score:.2f}  "
+            f"transitive={c.transitive_instance_count}  "
+            f"file={c.file_path.name}{marker}\n"
+        )
+    (step_dir / "tops.txt").write_text("".join(tops_lines))
+
+    write_macro_yaml(build_macro_report(infos), step_dir / "macros.yaml")
+
+    file_headers = {
+        str(fi.path): "\n".join(fi.path.read_text(errors="replace").splitlines()[:30])
+        for fi in src_infos
+    }
+    (step_dir / "file_headers.json").write_text(json.dumps(file_headers, indent=2))
+
+    (step_dir / "chosen_top.txt").write_text(best_top + "\n" if best_top else "")
+
+    return {"top": best_top, "n_files": len(src_infos)}
