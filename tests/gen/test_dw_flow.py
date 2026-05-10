@@ -101,3 +101,36 @@ def test_render_step_produces_filelist(tmp_path):
     assert "+incdir+" in text
     assert "tb_cpu" in text
     assert "base_pkg.sv" in text
+
+
+import shutil
+
+
+@pytest.mark.skipif(not shutil.which("eda-env"), reason="eda-env not available")
+def test_compile_step_records_result(tmp_path):
+    from vcodeman.gen.dw_flow.flow import (StepCfg, analyze_step,
+                                            compile_step, render_step)
+
+    cfg = StepCfg(rtl_dir=str(_cpu_fixture_dir()))
+
+    for label in ("analyze", "render"):
+        (tmp_path / label).mkdir()
+    analyze_step(cfg, _make_ctx(tmp_path / "analyze"))
+    render_ctx = _make_ctx(tmp_path / "render")
+    render_ctx.run_root = tmp_path
+    render_step(cfg, render_ctx)
+
+    compile_dir = tmp_path / "compile_0"
+    compile_dir.mkdir()
+    ctx = _make_ctx(compile_dir)
+    ctx.run_root = tmp_path
+    ctx.previous_filelist_dir = tmp_path / "render"
+
+    result = compile_step(cfg, ctx)
+
+    assert (compile_dir / "cpu.f").is_file()
+    assert (compile_dir / "result.json").is_file()
+    payload = json.loads((compile_dir / "result.json").read_text())
+    assert "success" in payload and "errors" in payload
+    assert payload["success"] is True
+    assert result["success"] is True

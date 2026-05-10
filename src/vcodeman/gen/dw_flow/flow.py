@@ -113,7 +113,7 @@ def analyze_step(cfg: StepCfg, ctx: Context) -> dict:
     return {"top": best_top, "n_files": len(src_infos)}
 
 
-from vcodeman.gen.compiler import BACKENDS
+from vcodeman.gen.compiler import BACKENDS, CompileError
 from vcodeman.gen.writer import render_filelist
 
 
@@ -153,3 +153,40 @@ def render_step(cfg: StepCfg, ctx: Context) -> dict:
     )
     (step_dir / "cpu.f").write_text(text)
     return {"top": chosen_top}
+
+
+@task(cache_policy=NO_CACHE, task_run_name=step_label)
+def compile_step(cfg: StepCfg, ctx: Context) -> dict:
+    """Compile the filelist from ctx.previous_filelist_dir/cpu.f.
+
+    Records {success, errors, stderr} as result.json, copies the input
+    cpu.f into step_dir for traceability.
+    """
+    step_dir = ctx.step_dir.path
+    src_dir = Path(ctx.previous_filelist_dir)
+    src_f = src_dir / "cpu.f"
+    target_f = step_dir / "cpu.f"
+    target_f.write_text(src_f.read_text())
+
+    chosen_top = ""
+    analyze_dir = _analyze_dir(ctx)
+    chosen_top_path = analyze_dir / "chosen_top.txt"
+    if chosen_top_path.is_file():
+        chosen_top = chosen_top_path.read_text().strip()
+
+    backend = BACKENDS[cfg.simulator]()
+    result = backend.compile(target_f, top_module=chosen_top or None)
+
+    payload = {
+        "success": result.success,
+        "errors": [
+            {"file": e.file, "line": e.line, "message": e.message, "raw": e.raw}
+            for e in result.errors
+        ],
+        "stderr": result.stderr if hasattr(result, "stderr") else "",
+    }
+    (step_dir / "result.json").write_text(json.dumps(payload, indent=2))
+    if hasattr(result, "stderr"):
+        (step_dir / "stderr.log").write_text(result.stderr)
+
+    return {"success": result.success, "n_errors": len(result.errors)}
