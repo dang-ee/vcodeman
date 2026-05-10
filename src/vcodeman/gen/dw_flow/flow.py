@@ -111,3 +111,45 @@ def analyze_step(cfg: StepCfg, ctx: Context) -> dict:
     (step_dir / "chosen_top.txt").write_text(best_top + "\n" if best_top else "")
 
     return {"top": best_top, "n_files": len(src_infos)}
+
+
+from vcodeman.gen.compiler import BACKENDS
+from vcodeman.gen.writer import render_filelist
+
+
+def _analyze_dir(ctx: Context) -> Path:
+    """Locate the analyze step's directory under the run_root.
+
+    By dw convention, ctx.run_root is the parent of all step dirs, and
+    each step dir is named after its label. analyze_step's label is
+    'analyze'. Tests set ctx.run_root directly; in real flow runs it's
+    attached to each step's Context by main().
+    """
+    return Path(ctx.run_root) / "analyze"
+
+
+@task(cache_policy=NO_CACHE, task_run_name=step_label)
+def render_step(cfg: StepCfg, ctx: Context) -> dict:
+    """Read analyze outputs, render initial filelist to step_dir/cpu.f."""
+    step_dir = ctx.step_dir.path
+    analyze_dir = _analyze_dir(ctx)
+
+    scan_data = json.loads((analyze_dir / "scan_result.json").read_text())
+    ordered = json.loads((analyze_dir / "ordered.json").read_text())
+    chosen_top = (analyze_dir / "chosen_top.txt").read_text().strip() or None
+
+    backend = BACKENDS[cfg.simulator]()
+    top_dir = backend.top_directive(chosen_top) if chosen_top else None
+
+    text = render_filelist(
+        [Path(p) for p in scan_data["include_dirs"]],
+        [Path(p) for p in ordered["packages"]],
+        [Path(p) for p in ordered["non_packages"]],
+        top_module=chosen_top,
+        top_directive=top_dir,
+        simulator=cfg.simulator,
+        iterations=0,
+        no_comments=False,
+    )
+    (step_dir / "cpu.f").write_text(text)
+    return {"top": chosen_top}

@@ -77,3 +77,27 @@ def test_analyze_step_writes_expected_artifacts(tmp_path):
     assert isinstance(ordered["packages"], list)
 
     assert (step_dir / "chosen_top.txt").read_text().strip() == "tb_cpu"
+
+
+def test_render_step_produces_filelist(tmp_path):
+    from vcodeman.gen.dw_flow.flow import StepCfg, analyze_step, render_step
+
+    cfg = StepCfg(rtl_dir=str(_cpu_fixture_dir()))
+
+    analyze_dir = tmp_path / "analyze"
+    analyze_dir.mkdir()
+    analyze_step(cfg, _make_ctx(analyze_dir))
+
+    render_dir = tmp_path / "render"
+    render_dir.mkdir()
+    ctx = _make_ctx(render_dir)
+    ctx.run_root = tmp_path
+
+    render_step(cfg, ctx)
+
+    cpu_f = render_dir / "cpu.f"
+    assert cpu_f.is_file()
+    text = cpu_f.read_text()
+    assert "+incdir+" in text
+    assert "tb_cpu" in text
+    assert "base_pkg.sv" in text
