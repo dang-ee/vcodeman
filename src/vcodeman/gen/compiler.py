@@ -91,3 +91,61 @@ class IcarusBackend(SimulatorBackend):
 BACKENDS: dict[str, type[SimulatorBackend]] = {
     "icarus": IcarusBackend,
 }
+
+
+import importlib.util
+import sys
+
+
+def resolve_backend(spec: str) -> type[SimulatorBackend]:
+    """Resolve a backend spec to a SimulatorBackend subclass.
+
+    Spec is one of:
+      - a name registered in BACKENDS (e.g. "icarus")
+      - a path to a .py file containing a SimulatorBackend subclass
+      - "<path>:<ClassName>" to disambiguate when the file has multiple
+    """
+    looks_like_path = "/" in spec or spec.endswith(".py") or spec.startswith(".")
+    if not looks_like_path:
+        if spec not in BACKENDS:
+            raise KeyError(
+                f"Unknown backend: {spec!r}. Available: {sorted(BACKENDS)}"
+            )
+        return BACKENDS[spec]
+
+    if ":" in spec:
+        path_str, class_name = spec.rsplit(":", 1)
+    else:
+        path_str, class_name = spec, None
+    path = Path(path_str).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Backend file not found: {path}")
+
+    module_name = f"vcodeman_user_backend_{path.stem}"
+    spec_obj = importlib.util.spec_from_file_location(module_name, path)
+    if spec_obj is None or spec_obj.loader is None:
+        raise ImportError(f"Cannot load backend from {path}")
+    mod = importlib.util.module_from_spec(spec_obj)
+    sys.modules[module_name] = mod
+    spec_obj.loader.exec_module(mod)
+
+    if class_name:
+        cls = getattr(mod, class_name, None)
+        if cls is None:
+            raise AttributeError(f"{path} has no class {class_name!r}")
+        return cls
+
+    candidates = [
+        v for v in vars(mod).values()
+        if isinstance(v, type)
+        and issubclass(v, SimulatorBackend)
+        and v is not SimulatorBackend
+    ]
+    if not candidates:
+        raise ValueError(f"No SimulatorBackend subclass in {path}")
+    if len(candidates) > 1:
+        raise ValueError(
+            f"{path} has multiple SimulatorBackend subclasses "
+            f"({[c.__name__ for c in candidates]}); use 'path:ClassName' to pick one"
+        )
+    return candidates[0]

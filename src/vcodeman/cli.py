@@ -158,11 +158,21 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
     runs_dir = Path(runs_dir) if Path(runs_dir).is_absolute() else (cwd / runs_dir).resolve()
     runs_dir.mkdir(parents=True, exist_ok=True)
 
+    # If --simulator looks like a file path, resolve against cwd so the
+    # subprocess can find it
+    sim_value = simulator
+    if "/" in sim_value or sim_value.endswith(".py") or sim_value.startswith("."):
+        if ":" in sim_value and not sim_value[1:3] == ":\\":  # not Windows drive
+            path_part, _, class_part = sim_value.rpartition(":")
+            sim_value = f"{(cwd / path_part).resolve()}:{class_part}"
+        else:
+            sim_value = str((cwd / sim_value).resolve())
+
     env = {
         **os.environ,
         "VCM_RTL_DIR": str(Path(rtl_dir).resolve()),
         "VCM_TOP": top,
-        "VCM_SIMULATOR": simulator,
+        "VCM_SIMULATOR": sim_value,
         "VCM_MAX_ITER": "0" if no_compile else str(max_iter),
         "VCM_USE_AI": "0" if (no_ai or no_compile) else "1",
         "DW_RUNS_DIR": str(runs_dir),

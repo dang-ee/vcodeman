@@ -222,3 +222,36 @@ def test_full_flow_via_dw_run_no_ai(tmp_path):
 
     final = json.loads((compile_0_d / "result.json").read_text())
     assert final["success"] is True
+
+
+def test_resolve_backend_in_render_step_uses_custom_file(tmp_path, monkeypatch):
+    """render_step should accept a backend specified as a file path."""
+    from vcodeman.gen.dw_flow.flow import StepCfg, analyze_step, render_step
+
+    backend_py = tmp_path / "stub_backend.py"
+    backend_py.write_text("""
+from vcodeman.gen.compiler import SimulatorBackend
+
+class StubBackend(SimulatorBackend):
+    name = "stub"
+    def compile_cmd(self, filelist, top_module=None):
+        return ["true"]  # always succeeds, ignores top
+    def parse_errors(self, stdout, stderr, rc):
+        return []
+    def top_directive(self, module):
+        return f"// -top {module}"
+""")
+
+    cfg = StepCfg(rtl_dir=str(_cpu_fixture_dir()), simulator=str(backend_py))
+    (tmp_path / "analyze").mkdir()
+    analyze_step(cfg, _make_ctx(tmp_path / "analyze"))
+
+    render_dir = tmp_path / "render"
+    render_dir.mkdir()
+    ctx = _make_ctx(render_dir)
+    ctx.run_root = tmp_path
+    render_step(cfg, ctx)
+
+    cpu_f = render_dir / "cpu.f"
+    assert cpu_f.is_file()
+    assert "// -top tb_cpu" in cpu_f.read_text()

@@ -157,7 +157,7 @@ from dw._step_env import resolve_step_env
 from dw.claude_agent.config import load_agent
 from dw.claude_agent.runner import run_agent
 
-from vcodeman.gen.compiler import BACKENDS, CompileError
+from vcodeman.gen.compiler import resolve_backend, CompileError
 from vcodeman.gen.dw_flow.repair import build_user_message, extract_filelist
 from vcodeman.gen.writer import render_filelist
 
@@ -184,7 +184,7 @@ def render_step(cfg: StepCfg, ctx: Context) -> dict:
     ordered = json.loads((analyze_dir / "ordered.json").read_text())
     chosen_top = (analyze_dir / "chosen_top.txt").read_text().strip() or None
 
-    backend = BACKENDS[cfg.simulator]()
+    backend = resolve_backend(cfg.simulator)()
     top_dir = backend.top_directive(chosen_top) if chosen_top else None
 
     text = render_filelist(
@@ -220,7 +220,7 @@ def compile_step(cfg: StepCfg, ctx: Context) -> dict:
     if chosen_top_path.is_file():
         chosen_top = chosen_top_path.read_text().strip()
 
-    backend = BACKENDS[cfg.simulator]()
+    backend = resolve_backend(cfg.simulator)()
     result = backend.compile(target_f, top_module=chosen_top or None)
 
     payload = {
