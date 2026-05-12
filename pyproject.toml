@@ -36,10 +36,20 @@ dependencies = [
 # Resolve `design-workflow` from a specific source. uv picks this up at
 # install time; downstream users who can't reach the URL can override
 # locally with `uv sync --override` or by adding their own [tool.uv.sources]
-# in a workspace pyproject.toml. To pull from an internal index instead,
-# add a [[tool.uv.index]] block and switch this entry to `{ index = "name" }`.
+# in a workspace pyproject.toml.
 [tool.uv.sources]
 design-workflow = { git = "https://github.com/dang-ee/design-workflow", branch = "develop" }
+
+# --- Alternative: pull design-workflow from an internal package index ---
+# Uncomment the block below (and comment out the git-source line above)
+# when an internal PyPI mirror is available.
+#
+# [[tool.uv.index]]
+# name = "internal"
+# url = "https://pypi.internal.example.com/simple/"
+#
+# [tool.uv.sources]
+# design-workflow = { index = "internal" }
 
 [project.optional-dependencies]
 dev = [
