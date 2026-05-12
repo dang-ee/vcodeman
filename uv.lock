@@ -546,7 +546,7 @@ wheels = [
 [[package]]
 name = "design-workflow"
 version = "0.1.0"
-source = { directory = "../design-workflow" }
+source = { git = "https://github.com/dang-ee/design-workflow?branch=develop#dfd07f7fc9be2de737b3f65ef76ca6029a194533" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "click" },
@@ -558,21 +558,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "claude-agent-sdk", specifier = ">=0.1" },
-    { name = "click", specifier = ">=8.1" },
-    { name = "libtmux", specifier = ">=0.30" },
-    { name = "loguru", specifier = ">=0.7" },
-    { name = "opencode-ai", marker = "extra == 'opencode'", specifier = ">=0.1.0a36" },
-    { name = "openpyxl", specifier = ">=3.1" },
-    { name = "prefect", specifier = ">=3.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
-]
-provides-extras = ["opencode"]
 
 [[package]]
 name = "docker"
@@ -2324,7 +2309,7 @@ dev = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.1.76" },
     { name = "click", specifier = ">=8.1.7" },
-    { name = "design-workflow", directory = "../design-workflow" },
+    { name = "design-workflow", git = "https://github.com/dang-ee/design-workflow?branch=develop" },
     { name = "lark", specifier = ">=1.1.9" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.3" },

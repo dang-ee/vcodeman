@@ -30,8 +30,16 @@ dependencies = [
     "tree-sitter-systemverilog>=0.3",
     "pyyaml>=6.0",
     "claude-agent-sdk>=0.1.76",
-    "design-workflow @ file:///home/d131.kim/project/design-workflow",
+    "design-workflow",
 ]
+
+# Resolve `design-workflow` from a specific source. uv picks this up at
+# install time; downstream users who can't reach the URL can override
+# locally with `uv sync --override` or by adding their own [tool.uv.sources]
+# in a workspace pyproject.toml. To pull from an internal index instead,
+# add a [[tool.uv.index]] block and switch this entry to `{ index = "name" }`.
+[tool.uv.sources]
+design-workflow = { git = "https://github.com/dang-ee/design-workflow", branch = "develop" }
 
 [project.optional-dependencies]
 dev = [

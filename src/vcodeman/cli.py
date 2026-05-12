@@ -146,20 +146,12 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
     import os
     import re
     import shutil
-    import subprocess
-
-    if not shutil.which("dw"):
-        click.secho("dw CLI not found on PATH. Install design-workflow.", fg="red", err=True)
-        sys.exit(1)
 
     cwd = Path(os.getcwd())
-    flow_py = Path(__file__).parent / "gen" / "dw_flow" / "flow.py"
     output = Path(output) if Path(output).is_absolute() else (cwd / output).resolve()
     runs_dir = Path(runs_dir) if Path(runs_dir).is_absolute() else (cwd / runs_dir).resolve()
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    # If --simulator looks like a file path, resolve against cwd so the
-    # subprocess can find it
     sim_value = simulator
     if "/" in sim_value or sim_value.endswith(".py") or sim_value.startswith("."):
         if ":" in sim_value and not sim_value[1:3] == ":\\":  # not Windows drive
@@ -168,8 +160,7 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
         else:
             sim_value = str((cwd / sim_value).resolve())
 
-    env = {
-        **os.environ,
+    env_overrides = {
         "VCM_RTL_DIR": str(Path(rtl_dir).resolve()),
         "VCM_TOP": top,
         "VCM_SIMULATOR": sim_value,
@@ -177,10 +168,20 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
         "VCM_USE_AI": "0" if (no_ai or no_compile) else "1",
         "DW_RUNS_DIR": str(runs_dir),
     }
-    completed = subprocess.run(["dw", "run", str(flow_py)], env=env, check=False)
-    if completed.returncode != 0:
-        click.secho(f"dw run failed (exit {completed.returncode}).", fg="red", err=True)
-        sys.exit(completed.returncode)
+    saved = {k: os.environ.get(k) for k in env_overrides}
+    os.environ.update(env_overrides)
+    try:
+        from vcodeman.gen.dw_flow.flow import main as flow_main
+        flow_main()
+    except Exception as e:
+        click.secho(f"flow failed: {type(e).__name__}: {e}", fg="red", err=True)
+        sys.exit(1)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     # Find the run_dir just created (most recent mtime in runs_dir)
     run_dir = max(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime)

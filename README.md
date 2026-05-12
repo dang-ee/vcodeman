@@ -13,10 +13,29 @@ cd vcodeman
 uv tool install .          # installs the `vcodeman` binary globally
 ```
 
-Development (editable):
+`vcodeman gen` pulls in `design-workflow` (the dw library) automatically.
+`uv` reads `[tool.uv.sources]` in `pyproject.toml` and fetches it from
+GitHub. If your dw repo is private, configure GitHub credentials first
+(SSH key or `GH_TOKEN`).
+
+Development (editable, with a local dw checkout you can edit in place):
 
 ```bash
 uv sync --all-extras
+# Optionally mount your local dw working tree as editable
+uv tool install . --with-editable /path/to/design-workflow
+```
+
+To pull dw from an internal index instead of GitHub, add a
+`[[tool.uv.index]]` block and switch the source to `{ index = "name" }`:
+
+```toml
+[[tool.uv.index]]
+name = "internal"
+url = "https://pypi.internal.example.com/simple/"
+
+[tool.uv.sources]
+design-workflow = { index = "internal" }
 ```
 
 ---
