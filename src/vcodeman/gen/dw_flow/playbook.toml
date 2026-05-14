@@ -1,0 +1,6 @@
+# vcodeman gen flow manifest.
+# No [[step]] blocks — orchestration is fully in flow.py (SDK mode).
+# Add [agents].paths here if repair_filelist moves outside the package.
+
+[agents]
+paths = ["./agents"]

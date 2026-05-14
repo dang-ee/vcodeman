@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import click
-
 from vcodeman._version import __version__
 
 
@@ -124,6 +123,107 @@ def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts, incdi
         if verbose > 1:
             import traceback
             traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command("gen")
+@click.argument("rtl_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=Path("./out.f"),
+              show_default=True, help="Output filelist path.")
+@click.option("-t", "--top", type=str, default="", show_default=False,
+              help="Top module name (default: auto-detect).")
+@click.option("--simulator", type=str, default="icarus", show_default=True,
+              help="Simulator backend.")
+@click.option("--max-iter", type=int, default=5, show_default=True,
+              help="Max repair iterations.")
+@click.option("--state-dir", type=click.Path(path_type=Path), default=Path("./dw_state"),
+              show_default=True,
+              help="dw state dir; runs/<id>/, memory/, prefect/ live underneath.")
+@click.option("--no-compile", is_flag=True, help="Skip compile + AI repair.")
+@click.option("--no-ai", is_flag=True, help="Compile but skip AI repair on failure.")
+def cmd_gen(rtl_dir, output, top, simulator, max_iter, state_dir, no_compile, no_ai):
+    """Generate a SystemVerilog filelist from RTL_DIR."""
+    import json
+    import os
+    import re
+    import shutil
+
+    cwd = Path(os.getcwd())
+    output = Path(output) if Path(output).is_absolute() else (cwd / output).resolve()
+    state_dir = Path(state_dir) if Path(state_dir).is_absolute() else (cwd / state_dir).resolve()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    runs_root = state_dir / "runs"
+
+    sim_value = simulator
+    if "/" in sim_value or sim_value.endswith(".py") or sim_value.startswith("."):
+        if ":" in sim_value and not sim_value[1:3] == ":\\":  # not Windows drive
+            path_part, _, class_part = sim_value.rpartition(":")
+            sim_value = f"{(cwd / path_part).resolve()}:{class_part}"
+        else:
+            sim_value = str((cwd / sim_value).resolve())
+
+    env_overrides = {
+        "VCM_RTL_DIR": str(Path(rtl_dir).resolve()),
+        "VCM_TOP": top,
+        "VCM_SIMULATOR": sim_value,
+        "VCM_MAX_ITER": "0" if no_compile else str(max_iter),
+        "VCM_USE_AI": "0" if (no_ai or no_compile) else "1",
+        "DW_STATE_DIR": str(state_dir),
+    }
+    saved = {k: os.environ.get(k) for k in env_overrides}
+    os.environ.update(env_overrides)
+    try:
+        from vcodeman.gen.dw_flow.flow import main as flow_main
+        flow_main()
+    except Exception as e:
+        click.secho(f"flow failed: {type(e).__name__}: {e}", fg="red", err=True)
+        sys.exit(1)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    # Find the run_dir just created (most recent mtime under <state>/runs/)
+    if not runs_root.is_dir():
+        raise click.ClickException(f"dw did not create {runs_root}")
+    run_dir = max(runs_root.iterdir(), key=lambda p: p.stat().st_mtime)
+
+    # dw names step dirs as NN.label (e.g. 01.analyze, 03.compile_0).
+    def _find_one(pattern: str) -> Path:
+        rx = re.compile(pattern)
+        matches = [p for p in run_dir.iterdir() if rx.fullmatch(p.name)]
+        if not matches:
+            raise click.ClickException(f"no step dir matching {pattern} under {run_dir}")
+        return matches[0]
+
+    def _find_last_compile() -> Path:
+        rx = re.compile(r"\d+\.compile_(\d+)")
+        matches = [(int(m.group(1)), p) for p in run_dir.iterdir()
+                   if (m := rx.fullmatch(p.name))]
+        if not matches:
+            raise click.ClickException(f"no compile_N step under {run_dir}")
+        return max(matches, key=lambda t: t[0])[1]
+
+    if no_compile:
+        src_cpu_f = _find_one(r"\d+\.render") / "cpu.f"
+        success = True
+    else:
+        last = _find_last_compile()
+        src_cpu_f = last / "cpu.f"
+        success = json.loads((last / "result.json").read_text())["success"]
+
+    analyze_dir = _find_one(r"\d+\.analyze")
+    shutil.copy(src_cpu_f, output)
+    shutil.copy(analyze_dir / "tops.txt", f"{output}.tops.txt")
+    shutil.copy(analyze_dir / "macros.yaml", f"{output}.macros.yaml")
+
+    if success:
+        click.echo(f"Generated: {output}  (debug: {run_dir})")
+    else:
+        click.secho("Compile still failing after AI repair.", fg="red", err=True)
+        click.echo(f"  resume: dw resume {run_dir}", err=True)
         sys.exit(1)
 
 
