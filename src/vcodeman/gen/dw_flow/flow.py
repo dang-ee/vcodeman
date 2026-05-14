@@ -260,6 +260,40 @@ def repair_step(cfg: StepCfg, ctx: Context) -> dict:
     (step_dir / "prompt.txt").write_text(user_message)
 
     result = dw.run_agent(ctx, "repair_filelist", user_message)
-    corrected = extract_filelist(result.final_text or "")
+    raw = result.final_text or _last_assistant_text(result.agent_dir) or ""
+    corrected = extract_filelist(raw)
     (step_dir / "cpu.f").write_text(corrected)
     return {"step_dir": str(step_dir)}
+
+
+def _last_assistant_text(agent_dir: Path) -> str | None:
+    """Fallback for when AgentResult.final_text is None — scan transcript
+    JSONL for the last assistant text block.
+
+    dw populates final_text from the SDK's ResultMessage.result field,
+    which isn't always set (depends on stop_reason). The transcript
+    always has the conversation, so we read it directly as a backup.
+    """
+    candidates = list(agent_dir.glob("claude-data/projects/*/*.jsonl"))
+    if not candidates:
+        return None
+    jsonl = max(candidates, key=lambda p: p.stat().st_mtime)
+    last_text: str | None = None
+    for line in jsonl.read_text().splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "assistant":
+            continue
+        msg = event.get("message", {})
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip():
+            last_text = content
+        elif isinstance(content, list):
+            parts = [b.get("text", "") for b in content
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            joined = "".join(parts).strip()
+            if joined:
+                last_text = joined
+    return last_text
