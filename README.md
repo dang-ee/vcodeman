@@ -294,7 +294,7 @@ Options:
 | `--max-iter N` | `5` | Cap on automatic repair attempts. |
 | `--no-compile` | off | Static analysis only; don't compile, don't repair. |
 | `--no-ai` | off | Compile once; on failure, exit without asking Claude. |
-| `--runs-dir PATH` | `./runs` | Where to keep per-step debug artifacts. |
+| `--state-dir PATH` | `./dw_state` | Parent of `runs/<id>/`, `memory/`, `prefect/` (dw layout). |
 
 Common patterns:
 
@@ -309,9 +309,9 @@ vcodeman gen ./rtl --output ./cpu.f --no-ai
 vcodeman gen ./rtl --output ./cpu.f --top tb_cpu
 ```
 
-Each invocation also creates a `./runs/<timestamp>-<id>/` directory
-containing the intermediate artifacts of every step (analysis JSON,
-intermediate filelists, compile error logs, repair prompts and
+Each invocation also creates `./dw_state/runs/<timestamp>-<id>/` (under
+`--state-dir`) containing the intermediate artifacts of every step
+(analysis JSON, intermediate filelists, compile error logs, repair prompts and
 responses). It's the place to look first when something goes wrong.
 
 `vcodeman gen` requires Claude Code to be installed and logged in

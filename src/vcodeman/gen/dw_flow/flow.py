@@ -18,10 +18,10 @@ from pathlib import Path
 from prefect import task
 from prefect.cache_policies import NO_CACHE
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from taskpipe.context import Context
 
 import dw
-from dw._task_run_name import step_label
+from dw.context import Context
+from dw.flow import step_label
 
 
 class StepCfg(BaseSettings):
@@ -153,10 +153,6 @@ def analyze_step(cfg: StepCfg, ctx: Context) -> dict:
     return {"top": best_top, "n_files": len(src_infos)}
 
 
-from dw._step_env import resolve_step_env
-from dw.claude_agent.config import load_agent
-from dw.claude_agent.runner import run_agent
-
 from vcodeman.gen.compiler import resolve_backend, CompileError
 from vcodeman.gen.dw_flow.repair import build_user_message, extract_filelist
 from vcodeman.gen.writer import render_filelist
@@ -263,15 +259,7 @@ def repair_step(cfg: StepCfg, ctx: Context) -> dict:
     user_message = build_user_message(current_filelist, errors, file_headers)
     (step_dir / "prompt.txt").write_text(user_message)
 
-    pkg = load_agent("agents/repair_filelist", manifest_dir=ctx.manifest_dir)
-    se = resolve_step_env(ctx, step=step_dir.name, workdir=str(step_dir))
-    raw = run_agent(
-        pkg,
-        user_prompt=user_message,
-        agent_dir=step_dir,
-        cwd=step_dir,
-        env=se.env,
-    )
-    corrected = extract_filelist(raw)
+    result = dw.run_agent(ctx, "repair_filelist", user_message)
+    corrected = extract_filelist(result.final_text or "")
     (step_dir / "cpu.f").write_text(corrected)
     return {"step_dir": str(step_dir)}

@@ -136,11 +136,12 @@ def parse(ctx, filelist, output, format, strict_env, env_pairs, skip_exts, incdi
               help="Simulator backend.")
 @click.option("--max-iter", type=int, default=5, show_default=True,
               help="Max repair iterations.")
-@click.option("--runs-dir", type=click.Path(path_type=Path), default=Path("./runs"),
-              show_default=True, help="Parent dir for dw run_dirs.")
+@click.option("--state-dir", type=click.Path(path_type=Path), default=Path("./dw_state"),
+              show_default=True,
+              help="dw state dir; runs/<id>/, memory/, prefect/ live underneath.")
 @click.option("--no-compile", is_flag=True, help="Skip compile + AI repair.")
 @click.option("--no-ai", is_flag=True, help="Compile but skip AI repair on failure.")
-def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_ai):
+def cmd_gen(rtl_dir, output, top, simulator, max_iter, state_dir, no_compile, no_ai):
     """Generate a SystemVerilog filelist from RTL_DIR."""
     import json
     import os
@@ -149,8 +150,9 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
 
     cwd = Path(os.getcwd())
     output = Path(output) if Path(output).is_absolute() else (cwd / output).resolve()
-    runs_dir = Path(runs_dir) if Path(runs_dir).is_absolute() else (cwd / runs_dir).resolve()
-    runs_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = Path(state_dir) if Path(state_dir).is_absolute() else (cwd / state_dir).resolve()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    runs_root = state_dir / "runs"
 
     sim_value = simulator
     if "/" in sim_value or sim_value.endswith(".py") or sim_value.startswith("."):
@@ -166,7 +168,7 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
         "VCM_SIMULATOR": sim_value,
         "VCM_MAX_ITER": "0" if no_compile else str(max_iter),
         "VCM_USE_AI": "0" if (no_ai or no_compile) else "1",
-        "DW_RUNS_DIR": str(runs_dir),
+        "DW_STATE_DIR": str(state_dir),
     }
     saved = {k: os.environ.get(k) for k in env_overrides}
     os.environ.update(env_overrides)
@@ -183,8 +185,10 @@ def cmd_gen(rtl_dir, output, top, simulator, max_iter, runs_dir, no_compile, no_
             else:
                 os.environ[k] = v
 
-    # Find the run_dir just created (most recent mtime in runs_dir)
-    run_dir = max(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime)
+    # Find the run_dir just created (most recent mtime under <state>/runs/)
+    if not runs_root.is_dir():
+        raise click.ClickException(f"dw did not create {runs_root}")
+    run_dir = max(runs_root.iterdir(), key=lambda p: p.stat().st_mtime)
 
     # dw names step dirs as NN.label (e.g. 01.analyze, 03.compile_0).
     def _find_one(pattern: str) -> Path:

@@ -546,7 +546,7 @@ wheels = [
 [[package]]
 name = "design-workflow"
 version = "0.1.0"
-source = { git = "https://github.com/dang-ee/design-workflow?branch=develop#dfd07f7fc9be2de737b3f65ef76ca6029a194533" }
+source = { git = "https://github.com/dang-ee/design-workflow?branch=develop#01e7fdba3089f070b0cc4617ef5e0a0ad335422a" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "click" },

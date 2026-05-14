@@ -25,13 +25,13 @@ def _cpu_fixture_dir() -> Path:
 
 def test_cmd_gen_creates_output_files(tmp_path):
     output = tmp_path / "cpu.f"
-    runs_dir = tmp_path / "runs"
+    state_dir = tmp_path / "dw_state"
 
     runner = CliRunner()
     result = runner.invoke(cli, [
         "gen", str(_cpu_fixture_dir()),
         "--output", str(output),
-        "--runs-dir", str(runs_dir),
+        "--state-dir", str(state_dir),
         "--no-ai",
     ])
     assert result.exit_code == 0, result.output
@@ -42,13 +42,13 @@ def test_cmd_gen_creates_output_files(tmp_path):
 
 def test_cmd_gen_no_compile_skips_compile_dir(tmp_path):
     output = tmp_path / "cpu.f"
-    runs_dir = tmp_path / "runs"
+    state_dir = tmp_path / "dw_state"
 
     runner = CliRunner()
     result = runner.invoke(cli, [
         "gen", str(_cpu_fixture_dir()),
         "--output", str(output),
-        "--runs-dir", str(runs_dir),
+        "--state-dir", str(state_dir),
         "--no-compile",
     ])
     assert result.exit_code == 0, result.output
@@ -56,7 +56,7 @@ def test_cmd_gen_no_compile_skips_compile_dir(tmp_path):
 
     # Verify no compile_N dir exists in the run_dir
     import re
-    run_dir = next(runs_dir.iterdir())
+    run_dir = next((state_dir / "runs").iterdir())
     rx = re.compile(r"\d+\.compile_\d+")
     compile_dirs = [p for p in run_dir.iterdir() if rx.fullmatch(p.name)]
     assert not compile_dirs, f"--no-compile must not produce compile dirs, got {compile_dirs}"
@@ -66,13 +66,13 @@ def test_cmd_gen_filelist_has_correct_order(tmp_path):
     """Verify the produced filelist has +incdir+ before sources, packages
     before non-packages."""
     output = tmp_path / "cpu.f"
-    runs_dir = tmp_path / "runs"
+    state_dir = tmp_path / "dw_state"
 
     runner = CliRunner()
     result = runner.invoke(cli, [
         "gen", str(_cpu_fixture_dir()),
         "--output", str(output),
-        "--runs-dir", str(runs_dir),
+        "--state-dir", str(state_dir),
         "--no-ai",
     ])
     assert result.exit_code == 0
@@ -88,13 +88,13 @@ def test_cmd_gen_filelist_has_correct_order(tmp_path):
 
 def test_cmd_gen_tops_file_contains_top(tmp_path):
     output = tmp_path / "cpu.f"
-    runs_dir = tmp_path / "runs"
+    state_dir = tmp_path / "dw_state"
 
     runner = CliRunner()
     result = runner.invoke(cli, [
         "gen", str(_cpu_fixture_dir()),
         "--output", str(output),
-        "--runs-dir", str(runs_dir),
+        "--state-dir", str(state_dir),
         "--no-ai",
     ])
     assert result.exit_code == 0
@@ -105,13 +105,13 @@ def test_cmd_gen_tops_file_contains_top(tmp_path):
 
 def test_cmd_gen_macros_file_has_simulation(tmp_path):
     output = tmp_path / "cpu.f"
-    runs_dir = tmp_path / "runs"
+    state_dir = tmp_path / "dw_state"
 
     runner = CliRunner()
     result = runner.invoke(cli, [
         "gen", str(_cpu_fixture_dir()),
         "--output", str(output),
-        "--runs-dir", str(runs_dir),
+        "--state-dir", str(state_dir),
         "--no-ai",
     ])
     assert result.exit_code == 0

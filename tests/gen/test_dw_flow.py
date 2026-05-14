@@ -4,7 +4,7 @@
 Layer 1 (here): each step function called directly with a fabricated
 step_dir and minimal Context. run_agent patched for repair_step.
 
-Layer 2 (here): subprocess `dw run` against a tmp DW_RUNS_DIR with
+Layer 2 (here): subprocess `dw run` against a tmp DW_STATE_DIR with
 run_agent patched. (Added in later tasks.)
 
 Layer 3: see test_e2e_ai_repair.py — real Claude, real iverilog.
@@ -48,7 +48,7 @@ def _make_ctx(step_dir: Path):
     """Fabricate a minimal Context that step functions can use."""
     ctx = MagicMock()
     ctx.step_dir.path = step_dir
-    ctx.manifest_dir = FLOW_PY.parent.resolve()
+    ctx.playbook_dir = FLOW_PY.parent.resolve()
     # step_label reads ctx.task_dir.path.name; must be a str not MagicMock
     ctx.task_dir.path.name = step_dir.name
     return ctx
@@ -155,10 +155,16 @@ def test_repair_step_uses_run_agent_and_post_processes(tmp_path, monkeypatch):
         "stderr": "",
     }))
 
-    def fake_run_agent(pkg, *, user_prompt, agent_dir, cwd, env):
-        return "```\n+incdir+/x/inc\n/x/pkg.sv\n/x/mod.sv\n```\n"
+    from types import SimpleNamespace
 
-    monkeypatch.setattr(flow_mod, "run_agent", fake_run_agent)
+    def fake_run_agent(ctx, ref, prompt, **kwargs):
+        return SimpleNamespace(
+            final_text="```\n+incdir+/x/inc\n/x/pkg.sv\n/x/mod.sv\n```\n",
+            stop_reason="end_turn", cost_usd=0.0, messages=1, duration=0.0,
+            agent_dir=ctx.step_dir.path,
+        )
+
+    monkeypatch.setattr(flow_mod.dw, "run_agent", fake_run_agent)
 
     repair_dir = tmp_path / "repair_1"
     repair_dir.mkdir()
@@ -186,8 +192,8 @@ def _find_step_dir(run_dir: Path, label: str) -> Path | None:
 @pytest.mark.skipif(not shutil.which("eda-env"), reason="eda-env not available")
 def test_full_flow_via_dw_run_no_ai(tmp_path):
     """Layer 2: real dw subprocess, --no-ai (no Claude needed)."""
-    runs_dir = tmp_path / "runs"
-    runs_dir.mkdir()
+    state_dir = tmp_path / "dw_state"
+    state_dir.mkdir()
 
     env = {
         **os.environ,
@@ -196,7 +202,7 @@ def test_full_flow_via_dw_run_no_ai(tmp_path):
         "VCM_SIMULATOR": "icarus",
         "VCM_MAX_ITER": "5",
         "VCM_USE_AI": "0",
-        "DW_RUNS_DIR": str(runs_dir),
+        "DW_STATE_DIR": str(state_dir),
     }
     completed = subprocess.run(
         ["uv", "run", "dw", "run", str(FLOW_PY)],
@@ -206,7 +212,9 @@ def test_full_flow_via_dw_run_no_ai(tmp_path):
         f"dw run failed:\nstdout:{completed.stdout}\nstderr:{completed.stderr}"
     )
 
-    run_dirs = list(runs_dir.iterdir())
+    runs_root = state_dir / "runs"
+    assert runs_root.is_dir(), f"dw did not create {runs_root}"
+    run_dirs = list(runs_root.iterdir())
     assert len(run_dirs) == 1, f"expected 1 run_dir, got {run_dirs}"
     run_dir = run_dirs[0]
 
