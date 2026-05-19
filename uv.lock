@@ -546,7 +546,7 @@ wheels = [
 [[package]]
 name = "design-workflow"
 version = "0.1.0"
-source = { git = "https://github.com/dang-ee/design-workflow?branch=develop#01e7fdba3089f070b0cc4617ef5e0a0ad335422a" }
+source = { git = "https://github.com/dang-ee/design-workflow?branch=develop#ecc29b207e594d9da1e28dea85a9aafbdb7b2c6e" }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "click" },
@@ -556,7 +556,6 @@ dependencies = [
     { name = "prefect" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "sqlalchemy" },
 ]
 
 [[package]]

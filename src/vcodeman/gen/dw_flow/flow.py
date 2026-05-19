@@ -24,6 +24,14 @@ from dw.context import Context
 from dw.flow import step_label
 
 
+# Declarative bundle for the repair agent — called once per repair_{i}
+# iteration inside the compile/repair loop. Centralizing the ref here
+# (instead of bare strings at each call site) makes it obvious which
+# agent participates in the loop and gives a single place to flip
+# memory mode / extra_options without hunting through tasks.
+REPAIR_AGENT = dw.AgentSpec(ref="repair_filelist")
+
+
 class StepCfg(BaseSettings):
     model_config = SettingsConfigDict(extra="forbid")
     rtl_dir: str
@@ -259,7 +267,7 @@ def repair_step(cfg: StepCfg, ctx: Context) -> dict:
     user_message = build_user_message(current_filelist, errors, file_headers)
     (step_dir / "prompt.txt").write_text(user_message)
 
-    result = dw.run_agent(ctx, "repair_filelist", user_message)
+    result = dw.run_agent(ctx, REPAIR_AGENT, user_message)
     raw = result.final_text or _last_assistant_text(result.agent_dir) or ""
     corrected = extract_filelist(raw)
     (step_dir / "cpu.f").write_text(corrected)

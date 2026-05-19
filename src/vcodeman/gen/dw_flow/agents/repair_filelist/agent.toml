@@ -1,2 +1,0 @@
-name = "repair_filelist"
-description = "Reorder a SystemVerilog filelist (.f) so it compiles cleanly."
